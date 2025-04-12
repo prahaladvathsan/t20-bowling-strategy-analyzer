@@ -2,9 +2,11 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 import sys
 import os
 from pathlib import Path
+import time
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -35,7 +37,10 @@ if 'initialized' not in st.session_state:
     st.session_state.batter_analyzer = None
     st.session_state.bowler_analyzer = None
     st.session_state.plan_generator = None
-    st.session_state.current_page = "Batter Analysis"  # Default page
+    st.session_state.current_page = "Batter Analysis"
+    st.session_state.app_started = False
+    st.session_state.data_loaded = False
+    st.session_state.analyzers_initialized = False
 
 # App title and description
 st.title("🏏 T20 Bowling Strategy Analyzer")
@@ -44,124 +49,134 @@ This application helps cricket teams develop data-driven bowling strategies
 for T20 matches based on ball-by-ball analysis.
 """)
 
+# Start button
+if not st.session_state.app_started:
+    if st.button("Start Application"):
+        st.session_state.app_started = True
+        st.rerun()
+    st.stop()
+
 # Sidebar for data input and global controls
 with st.sidebar:
     st.header("Data Input")
     
-    # Load local data file
-    data_path = Path(__file__).parent.parent / "data" / "t20_bbb.csv"
-    if data_path.exists():
-        try:
-            # Load data with low_memory=False to handle mixed types
-            data = pd.read_csv(data_path, low_memory=False)
-            
-            # Ensure required columns exist
-            required_columns = ['p_match', 'bat', 'bowl', 'line', 'length', 'phase', 'score', 'out']
-            missing_columns = [col for col in required_columns if col not in data.columns]
-            
-            if missing_columns:
-                st.error(f"Missing required columns: {', '.join(missing_columns)}")
-            else:
-                st.success(f"Loaded local data with {len(data)} records")
+    if not st.session_state.data_loaded:
+        # Load local data file
+        data_path = Path(__file__).parent.parent / "data" / "t20_bbb.csv"
+        if data_path.exists():
+            try:
+                with st.spinner("Loading data file..."):
+                    # Load data with low_memory=False to handle mixed types
+                    data = pd.read_csv(data_path, low_memory=False)
+                    st.success("Data file loaded successfully")
                 
-                # Process the data
-                data_processor = DataProcessor(data)
-                processed_data = data_processor.process()
-                
-                # Store in session state
-                st.session_state.data = processed_data
-                st.session_state.batter_analyzer = BatterVulnerabilityAnalyzer(processed_data)
-                st.session_state.bowler_analyzer = BowlerAnalyzer(processed_data)
-                
-                # Initialize plan generator if not already done
-                if not hasattr(st.session_state, 'plan_generator') or st.session_state.plan_generator is None:
-                    st.session_state.plan_generator = BowlingPlanGenerator(processed_data)
+                with st.spinner("Validating data..."):
+                    # Ensure required columns exist
+                    required_columns = ['p_match', 'bat', 'bowl', 'line', 'length', 'phase', 'score', 'out']
+                    missing_columns = [col for col in required_columns if col not in data.columns]
                     
-                # Display data stats
-                st.subheader("Dataset Statistics")
-                st.write(f"Matches: {processed_data['p_match'].nunique()}")
-                st.write(f"Batters: {processed_data['bat'].nunique()}")
-                st.write(f"Bowlers: {processed_data['bowl'].nunique()}")
-                
-        except Exception as e:
-            st.error(f"Error loading local data: {str(e)}")
-            st.error("Please check the data format and try again.")
+                    if missing_columns:
+                        st.error(f"Missing required columns: {', '.join(missing_columns)}")
+                    else:
+                        st.success("Data validation successful")
+                        
+                        with st.spinner("Processing data..."):
+                            try:
+                                # Process the data
+                                data_processor = DataProcessor(data)
+                                processed_data = data_processor.process()
+                                st.success("Data processing completed")
+                                
+                                # Store in session state
+                                st.session_state.data = processed_data
+                                st.session_state.data_loaded = True
+                                
+                                # Display data stats
+                                st.subheader("Dataset Statistics")
+                                st.write(f"Matches: {processed_data['p_match'].nunique()}")
+                                st.write(f"Batters: {processed_data['bat'].nunique()}")
+                                st.write(f"Bowlers: {processed_data['bowl'].nunique()}")
+                                
+                                # Initialize analyzers with progress tracking
+                                st.write("Initializing analyzers...")
+                                progress_bar = st.progress(0)
+                                
+                                st.write("Creating BatterVulnerabilityAnalyzer...")
+                                try:
+                                    # Initialize with only necessary columns to reduce memory usage
+                                    analysis_data = processed_data[['bat', 'bat_hand', 'score', 'out', 'bowl_kind']].copy()
+                                    st.session_state.batter_analyzer = BatterVulnerabilityAnalyzer(analysis_data)
+                                    progress_bar.progress(25)
+                                    st.success("Batter analyzer initialized")
+                                    
+                                    st.write("Creating BowlerAnalyzer...")
+                                    # Initialize with only necessary columns for bowler analysis
+                                    bowler_data = processed_data[['bowl', 'bowl_kind', 'bowl_style', 'line', 'length', 'score', 'out']].copy()
+                                    st.session_state.bowler_analyzer = BowlerAnalyzer(bowler_data)
+                                    progress_bar.progress(50)
+                                    st.success("Bowler analyzer initialized")
+                                    
+                                    st.write("Creating BowlingPlanGenerator...")
+                                    st.session_state.plan_generator = BowlingPlanGenerator(processed_data)
+                                    progress_bar.progress(75)
+                                    st.success("Plan generator initialized")
+                                    
+                                    progress_bar.progress(100)
+                                    st.session_state.analyzers_initialized = True
+                                    st.success("All analyzers initialized successfully!")
+                                    
+                                    time.sleep(1)  # Give users time to see the success message
+                                    st.rerun()
+                                    
+                                except Exception as analyzer_error:
+                                    st.error(f"Error initializing analyzers: {str(analyzer_error)}")
+                                    st.error("Debug info:")
+                                    st.write(f"Memory usage: {processed_data.memory_usage().sum() / 1024**2:.2f} MB")
+                                    st.write(f"Number of rows: {len(processed_data)}")
+                                    st.write(f"Columns: {', '.join(processed_data.columns)}")
+                                    st.exception(analyzer_error)
+                            except Exception as proc_error:
+                                st.error(f"Error processing data: {str(proc_error)}")
+                                st.exception(proc_error)
+
+            except Exception as e:
+                st.error(f"Error loading local data: {str(e)}")
+                st.error("Please check the data format and try again.")
+                st.exception(e)
+        else:
+            st.error("Local data file not found. Please ensure t20_bbb.csv exists in the data directory.")
     else:
-        st.error("Local data file not found. Please ensure t20_bbb.csv exists in the data directory.")
-    
-    st.markdown("---")
-    st.header("Navigation")
-    
-    # Navigation options
-    page = st.radio(
-        "Select Analysis",
-        ["Batter Analysis", "Bowler Strategies", "Match-up Optimization", "Complete Bowling Plan"],
-        index=0  # Default to first option
-    )
-    
-    # Update current page in session state
-    st.session_state.current_page = page
+        # Show navigation only after data is loaded
+        st.markdown("---")
+        st.header("Navigation")
+        
+        # Navigation options
+        page = st.radio(
+            "Select Analysis",
+            ["Batter Analysis", "Bowler Strategies", "Match-up Optimization", "Complete Bowling Plan"],
+            index=0,
+            key="page_selection"
+        )
+        
+        # Update current page in session state
+        st.session_state.current_page = page
 
 # Main content area based on selection
-if st.session_state.data is None:
-    # Display instructions if no data loaded
-    st.info("Please ensure the data file exists in the data directory and has the correct format.")
+if not st.session_state.data_loaded:
+    st.info("Please wait while the data is being loaded and processed...")
+    st.stop()
+
+# Render appropriate page based on selection
+if st.session_state.current_page == "Batter Analysis":
+    st.header("Batter Vulnerability Analysis")
     
-    with st.expander("Data Format"):
-        st.markdown("""
-        The CSV should include the following columns:
-        - `p_match`: Match ID
-        - `bat`: Batter name
-        - `bowl`: Bowler name
-        - `line`: Bowling line (Off, Middle, Leg)
-        - `length`: Bowling length (Yorker, Full, Good, Short)
-        - `phase`: Game phase (1, 2, 3)
-        - `score`: Runs scored on each ball
-        - `out`: Boolean indicating dismissal
-        
-        Additional columns like `bat_hand`, `bowl_style`, and `bowl_kind` improve analysis quality.
-        """)
+    # Batter selection
+    batters = sorted(st.session_state.data['bat'].unique())
+    selected_batter = st.selectbox("Select Batter", batters)
     
-    # Display sample CSV template for download
-    sample_data = {
-        'p_match': [1001, 1001, 1001, 1001, 1001],
-        'inns': [1, 1, 1, 1, 1],
-        'bat': ['Rohit Sharma', 'Rohit Sharma', 'Rohit Sharma', 'Virat Kohli', 'Virat Kohli'],
-        'team_bat': ['India', 'India', 'India', 'India', 'India'], 
-        'bowl': ['Shaheen Afridi', 'Shaheen Afridi', 'Haris Rauf', 'Haris Rauf', 'Shadab Khan'],
-        'team_bowl': ['Pakistan', 'Pakistan', 'Pakistan', 'Pakistan', 'Pakistan'],
-        'ball': [1, 2, 3, 4, 5],
-        'score': [0, 4, 1, 2, 0],
-        'out': [False, False, False, False, True],
-        'phase': [1, 1, 1, 1, 1],
-        'line': ['Off', 'Middle', 'Off', 'Leg', 'Middle'],
-        'length': ['Good', 'Full', 'Short', 'Good', 'Good'],
-        'bat_hand': ['RHB', 'RHB', 'RHB', 'RHB', 'RHB'],
-        'bowl_kind': ['pace bowler', 'pace bowler', 'pace bowler', 'pace bowler', 'spin bowler']
-    }
-    
-    sample_df = pd.DataFrame(sample_data)
-    csv = sample_df.to_csv(index=False)
-    
-    st.download_button(
-        "Download Sample CSV Template",
-        csv,
-        "sample_template.csv",
-        "text/csv",
-        key='download-sample'
-    )
-        
-else:
-    # Render appropriate page based on selection
-    if st.session_state.current_page == "Batter Analysis":
-        st.header("Batter Vulnerability Analysis")
-        
-        # Batter selection
-        batters = sorted(st.session_state.data['bat'].unique())
-        selected_batter = st.selectbox("Select Batter", batters)
-        
-        if selected_batter:
-            # Get batter analysis
+    if selected_batter:
+        # Get batter analysis
+        with st.spinner("Analyzing batter..."):
             batter_profile = st.session_state.batter_analyzer.analyze_batter(selected_batter)
             
             if batter_profile:
