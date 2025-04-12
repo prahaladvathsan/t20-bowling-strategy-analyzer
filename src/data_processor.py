@@ -16,7 +16,7 @@ class DataProcessor:
             Raw ball-by-ball cricket data as a DataFrame or a file path to CSV
         """
         if isinstance(data, str):
-            self.raw_data = pd.read_csv(data)
+            self.raw_data = pd.read_csv(data, low_memory=False)
         else:
             self.raw_data = data.copy()
         self.processed_data = None
@@ -30,25 +30,48 @@ class DataProcessor:
         pandas.DataFrame
             Processed DataFrame with standardized columns and filled missing values
         """
-        # Make a copy to avoid modifying the original
-        df = self.raw_data.copy()
-        
-        # Fill missing values with appropriate defaults
-        self._fill_missing_values(df)
-        
-        # Standardize column values
-        self._standardize_columns(df)
-        
-        # Create derived columns if needed
-        self._create_derived_columns(df)
-        
-        # Ensure required columns exist
-        self._validate_required_columns(df)
-        
-        # Store the processed data
-        self.processed_data = df
-        
-        return self.processed_data
+        try:
+            # Make a copy to avoid modifying the original
+            df = self.raw_data.copy()
+            
+            # Ensure required columns exist
+            self._validate_required_columns(df)
+            
+            # Fill missing values with appropriate defaults
+            self._fill_missing_values(df)
+            
+            # Standardize column values
+            self._standardize_columns(df)
+            
+            # Create derived columns if needed
+            self._create_derived_columns(df)
+            
+            # Store the processed data
+            self.processed_data = df
+            
+            return self.processed_data
+            
+        except Exception as e:
+            print(f"Error in data processing: {str(e)}")
+            raise
+    
+    def _create_derived_columns(self, df):
+        # Check if wagon coordinates exist
+        if 'wagon_x' in df.columns and 'wagon_y' in df.columns:
+            # Calculate shot distance from origin (180,180)
+            df['shot_distance'] = np.sqrt(
+                (df['wagon_x'] - 180) ** 2 + 
+                (df['wagon_y'] - 180) ** 2
+            )
+            
+            # Calculate shot angle (in degrees) from origin
+            # Using atan2 to get angle in correct quadrant
+            df['shot_angle'] = np.degrees(
+                np.arctan2(
+                    df['wagon_y'] - 180,
+                    df['wagon_x'] - 180
+                )
+            )
     
     def _fill_missing_values(self, df):
         """
@@ -74,26 +97,6 @@ class DataProcessor:
         if 'out' in df.columns:
             df['out'] = df['out'].fillna(False)
         
-        if 'phase' in numeric_cols:
-            # Determine phase from over number if missing
-            mask = df['phase'].isna()
-            if mask.any():
-                # T20 has specific phase definitions (as provided):
-                # Phase 1: Overs 1-6 (Powerplay)
-                # Phase 2: Overs 7-12 (Middle overs first part)
-                # Phase 3: Overs 13-16 (Middle overs second part)
-                # Phase 4: Overs 17-20 (Death overs)
-                
-                # Assign phases based on over number
-                conditions = [
-                    (df['over'] >= 1) & (df['over'] <= 6),
-                    (df['over'] >= 7) & (df['over'] <= 12),
-                    (df['over'] >= 13) & (df['over'] <= 16),
-                    (df['over'] >= 17) & (df['over'] <= 20)
-                ]
-                choices = [1, 2, 3, 4]
-                
-                df.loc[mask, 'phase'] = np.select(conditions, choices, default=0)
         
         # Fill remaining numeric columns with 0
         for col in numeric_cols:
@@ -109,22 +112,6 @@ class DataProcessor:
         df : pandas.DataFrame
             DataFrame to process
         """
-        # Standardize phase values
-        if 'phase' in df.columns:
-            # Ensure phase is an integer between 1-4
-            df['phase'] = df['phase'].astype(float).astype('Int64')
-            # Validate and correct phase values
-            mask = ~df['phase'].isin([1, 2, 3, 4])
-            if mask.any():
-                # For invalid phases, determine from over number
-                conditions = [
-                    (df['over'] >= 1) & (df['over'] <= 6),
-                    (df['over'] >= 7) & (df['over'] <= 12),
-                    (df['over'] >= 13) & (df['over'] <= 16),
-                    (df['over'] >= 17) & (df['over'] <= 20)
-                ]
-                choices = [1, 2, 3, 4]
-                df.loc[mask, 'phase'] = np.select(conditions, choices, default=0)
         
         # Standardize bowling line
         if 'line' in df.columns:
@@ -166,83 +153,26 @@ class DataProcessor:
                     reverse_length_mapping.get(x, x) if isinstance(x, (int, float)) else str(x).upper()
                 )
             )
-        
-        # Identify bowl_kind from bowl_style if missing
-        if 'bowl_style' in df.columns and 'bowl_kind' in df.columns:
-            # Create a mapping of bowl_style prefixes to determine bowl_kind
-            pace_prefixes = ['RF', 'RFM', 'RMF', 'LF', 'LFM', 'LMF', 'RM', 'LM', 'RS', 'LS']
-            spin_prefixes = ['LB', 'LWS', 'SLA', 'OB', 'LBG', 'RAB', 'LAB']
-            
-            # Fill missing bowl_kind values based on bowl_style
-            mask = df['bowl_kind'].isna() | (df['bowl_kind'] == 'Unknown')
-            if mask.any():
-                # Function to determine bowl_kind from bowl_style
-                def get_bowl_kind(style):
-                    if pd.isna(style) or style == '-' or style == 'Unknown':
-                        return 'Unknown'
-                    
-                    style_parts = style.split('/')
-                    for part in style_parts:
-                        part = part.strip()
-                        for prefix in pace_prefixes:
-                            if part.startswith(prefix):
-                                return 'pace bowler'
-                        for prefix in spin_prefixes:
-                            if part.startswith(prefix):
-                                return 'spin bowler'
-                    
-                    return 'Unknown'
-                
-                df.loc[mask, 'bowl_kind'] = df.loc[mask, 'bowl_style'].apply(get_bowl_kind)
     
-    def _create_derived_columns(self, df):
-        """
-        Create useful derived columns for analysis.
-        
-        Parameters:
-        -----------
-        df : pandas.DataFrame
-            DataFrame to process
-        """
-        # Process wagon wheel data
-        # Wagon wheel coordinates have (180,180) as origin with radius 180
-        # Pitch length is 30 units (from 165 to 195 on y scale)
-        if all(col in df.columns for col in ['wagonX', 'wagonY']):
-            # Calculate distance from origin (center of the field)
-            df['shot_distance'] = np.sqrt((df['wagonX'] - 180)**2 + (df['wagonY'] - 180)**2)
-            
-            # Calculate shot angle (in degrees, 0 is straight, positive is offside for RHB)
-            df['shot_angle'] = np.degrees(np.arctan2(df['wagonX'] - 180, df['wagonY'] - 180))
     
     def _validate_required_columns(self, df):
         """
-        Ensure that required columns exist in the DataFrame.
+        Validate that all required columns exist in the DataFrame.
         
         Parameters:
         -----------
         df : pandas.DataFrame
             DataFrame to validate
-        
-        Raises:
-        -------
-        ValueError
-            If required columns are missing
         """
-        required_columns = ['bat', 'bowl', 'score', 'out']
+        required_columns = ['p_match', 'bat', 'bowl', 'line', 'length', 'phase', 'score', 'out']
         missing_columns = [col for col in required_columns if col not in df.columns]
         
         if missing_columns:
-            raise ValueError(f"Required columns missing: {', '.join(missing_columns)}")
-        
-        # Check if important columns for better analysis exist, add them if not
-        recommended_columns = ['line', 'length', 'phase', 'bat_hand', 'bowl_style', 'bowl_kind']
-        for col in recommended_columns:
-            if col not in df.columns:
-                print(f"Warning: Recommended column '{col}' is missing. Analysis may be limited.")
-
+            raise ValueError(f"Missing required columns: {', '.join(missing_columns)}")
+    
     def get_processed_data(self):
         """
-        Return the processed data or process it if not done yet.
+        Get the processed data.
         
         Returns:
         --------
@@ -250,7 +180,7 @@ class DataProcessor:
             Processed DataFrame
         """
         if self.processed_data is None:
-            return self.process()
+            raise ValueError("Data has not been processed yet. Call process() first.")
         return self.processed_data
 
 

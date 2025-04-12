@@ -35,6 +35,7 @@ if 'initialized' not in st.session_state:
     st.session_state.batter_analyzer = None
     st.session_state.bowler_analyzer = None
     st.session_state.plan_generator = None
+    st.session_state.current_page = "Batter Analysis"  # Default page
 
 # App title and description
 st.title("🏏 T20 Bowling Strategy Analyzer")
@@ -43,44 +44,25 @@ This application helps cricket teams develop data-driven bowling strategies
 for T20 matches based on ball-by-ball analysis.
 """)
 
-# Sidebar for data upload and global controls
+# Sidebar for data input and global controls
 with st.sidebar:
     st.header("Data Input")
     
-    # Option to use sample data
-    use_sample = st.checkbox("Use sample data")
-    
-    if use_sample:
-        # Load sample data (you'll need to include this in your repo)
-        sample_path = Path(__file__).parent.parent / "data" / "sample_t20_data.csv"
-        if sample_path.exists():
-            data = pd.read_csv(sample_path)
-            st.success(f"Loaded sample data with {len(data)} records")
+    # Load local data file
+    data_path = Path(__file__).parent.parent / "data" / "t20_bbb.csv"
+    if data_path.exists():
+        try:
+            # Load data with low_memory=False to handle mixed types
+            data = pd.read_csv(data_path, low_memory=False)
             
-            # Process the data
-            data_processor = DataProcessor(data)
-            processed_data = data_processor.process()
+            # Ensure required columns exist
+            required_columns = ['p_match', 'bat', 'bowl', 'line', 'length', 'phase', 'score', 'out']
+            missing_columns = [col for col in required_columns if col not in data.columns]
             
-            # Store in session state
-            st.session_state.data = processed_data
-            st.session_state.batter_analyzer = BatterVulnerabilityAnalyzer(processed_data)
-            st.session_state.bowler_analyzer = BowlerAnalyzer(processed_data)
-            
-            # Initialize plan generator if not already done
-            if not hasattr(st.session_state, 'plan_generator') or st.session_state.plan_generator is None:
-                st.session_state.plan_generator = BowlingPlanGenerator(processed_data)
-        else:
-            st.error("Sample data file not found. Please upload your own data.")
-            use_sample = False
-    
-    if not use_sample:
-        uploaded_file = st.file_uploader("Upload ball-by-ball data (CSV)", type=["csv"])
-        
-        if uploaded_file is not None:
-            # Load and process data
-            try:
-                data = pd.read_csv(uploaded_file)
-                st.success(f"Loaded {len(data)} records")
+            if missing_columns:
+                st.error(f"Missing required columns: {', '.join(missing_columns)}")
+            else:
+                st.success(f"Loaded local data with {len(data)} records")
                 
                 # Process the data
                 data_processor = DataProcessor(data)
@@ -91,17 +73,21 @@ with st.sidebar:
                 st.session_state.batter_analyzer = BatterVulnerabilityAnalyzer(processed_data)
                 st.session_state.bowler_analyzer = BowlerAnalyzer(processed_data)
                 
-                # Initialize plan generator
-                st.session_state.plan_generator = BowlingPlanGenerator(processed_data)
-                
+                # Initialize plan generator if not already done
+                if not hasattr(st.session_state, 'plan_generator') or st.session_state.plan_generator is None:
+                    st.session_state.plan_generator = BowlingPlanGenerator(processed_data)
+                    
                 # Display data stats
                 st.subheader("Dataset Statistics")
                 st.write(f"Matches: {processed_data['p_match'].nunique()}")
                 st.write(f"Batters: {processed_data['bat'].nunique()}")
                 st.write(f"Bowlers: {processed_data['bowl'].nunique()}")
-            
-            except Exception as e:
-                st.error(f"Error processing file: {e}")
+                
+        except Exception as e:
+            st.error(f"Error loading local data: {str(e)}")
+            st.error("Please check the data format and try again.")
+    else:
+        st.error("Local data file not found. Please ensure t20_bbb.csv exists in the data directory.")
     
     st.markdown("---")
     st.header("Navigation")
@@ -109,17 +95,21 @@ with st.sidebar:
     # Navigation options
     page = st.radio(
         "Select Analysis",
-        ["Batter Analysis", "Bowler Strategies", "Match-up Optimization", "Complete Bowling Plan"]
+        ["Batter Analysis", "Bowler Strategies", "Match-up Optimization", "Complete Bowling Plan"],
+        index=0  # Default to first option
     )
+    
+    # Update current page in session state
+    st.session_state.current_page = page
 
 # Main content area based on selection
 if st.session_state.data is None:
-    # Display instructions if no data uploaded
-    st.info("Please upload your ball-by-ball data CSV file or use sample data to begin analysis.")
+    # Display instructions if no data loaded
+    st.info("Please ensure the data file exists in the data directory and has the correct format.")
     
-    with st.expander("Sample Data Format"):
+    with st.expander("Data Format"):
         st.markdown("""
-        Your CSV should include the following columns:
+        The CSV should include the following columns:
         - `p_match`: Match ID
         - `bat`: Batter name
         - `bowl`: Bowler name
@@ -163,7 +153,7 @@ if st.session_state.data is None:
         
 else:
     # Render appropriate page based on selection
-    if page == "Batter Analysis":
+    if st.session_state.current_page == "Batter Analysis":
         st.header("Batter Vulnerability Analysis")
         
         # Batter selection
@@ -281,7 +271,7 @@ else:
                     else:
                         st.write("No data available on performance against different bowler types.")
     
-    elif page == "Bowler Strategies":
+    elif st.session_state.current_page == "Bowler Strategies":
         st.header("Optimal Bowling Strategies")
         
         # Bowler selection
@@ -411,7 +401,7 @@ else:
                 else:
                     st.write("Not enough data to visualize line and length effectiveness.")
     
-    elif page == "Match-up Optimization":
+    elif st.session_state.current_page == "Match-up Optimization":
         st.header("Batter-Bowler Match-up Optimization")
         
         col1, col2 = st.columns(2)
@@ -505,7 +495,7 @@ else:
             else:
                 st.write("Plan generator not initialized. Cannot analyze matchups.")
     
-    elif page == "Complete Bowling Plan":
+    elif st.session_state.current_page == "Complete Bowling Plan":
         st.header("Comprehensive Bowling Plan Generator")
         
         # Batter selection
@@ -802,4 +792,4 @@ else:
 
 # Footer
 st.markdown("---")
-st.markdown("Created with ❤️ using Streamlit • [GitHub Repository](https://github.com/yourusername/t20-bowling-strategy-analyzer)")
+st.markdown("Created with ❤️ using Streamlit • [GitHub Repository](https://github.com/prahaladvathsan/t20-bowling-strategy-analyzer)")
