@@ -14,7 +14,7 @@ from src.data_processor import DataProcessor
 from src.batter_analyzer import BatterVulnerabilityAnalyzer
 from src.bowler_analyzer import BowlerAnalyzer 
 from src.bowling_plan_generator import BowlingPlanGenerator
-from app.utils.visualization import (
+from utils.visualization import (
     create_vulnerability_heatmap,
     create_field_placement_visualization,
     get_strategy_visualization
