@@ -5,74 +5,176 @@ import pandas as pd
 import numpy as np
 import io
 
-def create_vulnerability_heatmap(batter_data):
+def create_common_heatmap(data, row_labels, col_labels, title, cmap='YlOrRd', value_label='Value'):
     """
-    Create a heatmap showing a batter's vulnerability to different line/length combinations
+    Common function to create heatmaps with consistent styling
     
     Parameters:
     -----------
-    batter_data : dict
-        Dictionary with batter analysis data
-    
+    data : numpy.ndarray
+        2D array of values to display
+    row_labels : list
+        Labels for rows (y-axis)
+    col_labels : list
+        Labels for columns (x-axis)
+    title : str
+        Title of the heatmap
+    cmap : str
+        Matplotlib colormap name
+    value_label : str
+        Label for the colorbar
+        
     Returns:
     --------
-    fig : matplotlib figure
+    matplotlib.figure.Figure
     """
-    # Create a 3x4 grid for line and length combinations
-    # Lines: Off, Middle, Leg
-    # Lengths: Yorker, Full, Good, Short
+    # Create figure and axes with specified size
+    fig, ax = plt.subplots(figsize=(12, 8))
+    
+    # Create heatmap using imshow
+    im = ax.imshow(data, cmap=cmap)
+    
+    # Add colorbar
+    cbar = ax.figure.colorbar(im, ax=ax)
+    cbar.ax.set_ylabel(value_label, rotation=-90, va="bottom")
+
+    # Add text annotations
+    for i in range(len(row_labels)):
+        for j in range(len(col_labels)):
+            value = data[i, j]
+            text = ax.text(j, i, f'{value:.2f}',
+                         ha="center", va="center",
+                         color="black" if value < np.max(data) * 0.7 else "white",
+                         fontweight='bold')
+
+    # Configure axis labels and ticks
+    ax.set_xticks(np.arange(len(col_labels)))
+    ax.set_yticks(np.arange(len(row_labels)))
+    ax.set_xticklabels(col_labels)
+    ax.set_yticklabels(row_labels)
+
+    # Rotate and align the tick labels so they look better
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+    
+    # Add title and labels
+    ax.set_title(title, fontsize=14, pad=20)
+    ax.set_xlabel("Line", fontsize=12)
+    ax.set_ylabel("Length", fontsize=12)
+
+    # Adjust layout to prevent label cutoff
+    plt.tight_layout()
+    
+    return fig
+
+def create_vulnerability_heatmap(batter_data):
+    """
+    Create a heatmap showing a batter's vulnerability to different line/length combinations
+    """
+    from src.data_processor import DataProcessor
+    
+    # Define display labels in the same order as numeric indices
+    lines = [DataProcessor.LINE_DISPLAY[i] for i in range(5)]
+    lengths = [DataProcessor.LENGTH_DISPLAY[i] for i in range(6)]
+    
+    # Initialize data matrix
+    data = np.zeros((6, 5))  # 6 lengths x 5 lines
     
     # Extract line-length data
     line_length_stats = batter_data.get('vs_line_length', {})
     
-    # Create a data frame for the heatmap
-    lines = ['Off', 'Middle', 'Leg']
-    lengths = ['Yorker', 'Full', 'Good', 'Short']
-    
-    data = np.zeros((len(lengths), len(lines)))
-    count = np.zeros((len(lengths), len(lines)))
-    
-    for (line, length), stats in line_length_stats.items():
-        if line in lines and length in lengths:
-            row_idx = lengths.index(length)
-            col_idx = lines.index(line)
-            
-            # Calculate vulnerability score
-            # Lower average = higher vulnerability
-            if stats['dismissals'] > 0 and stats['balls'] >= 5:
-                vulnerability = 100 / stats['average']
-            else:
-                # If no dismissals, use strike rate (lower = more vulnerable)
-                vulnerability = 100 / stats['strike_rate'] if stats['strike_rate'] > 0 else 0
-            
-            data[row_idx, col_idx] = vulnerability
-            count[row_idx, col_idx] = stats['balls']
+    # Fill in the data where we have values
+    if line_length_stats:
+        for (line, length), stats in line_length_stats.items():
+            try:
+                # Find indices based on display values
+                col_idx = lines.index(line)
+                row_idx = lengths.index(length)
+                
+                # Calculate vulnerability score
+                if stats['dismissals'] > 0:
+                    vulnerability = 100 / stats['average']
+                else:
+                    # If no dismissals, use strike rate (lower = more vulnerable)
+                    vulnerability = 100 / stats['strike_rate'] if stats['strike_rate'] > 0 else 0
+                
+                data[row_idx, col_idx] = vulnerability
+            except (ValueError, IndexError):
+                continue
     
     # Normalize data for better visualization
     max_vulnerability = np.max(data) if np.max(data) > 0 else 1
-    data = data / max_vulnerability
+    normalized_data = data / max_vulnerability if max_vulnerability > 0 else data
     
-    # Create figure
-    fig, ax = plt.subplots(figsize=(10, 8))
-    
-    # Create heatmap
-    sns.heatmap(
-        data,
-        annot=True,
-        fmt=".2f",
-        cmap="YlOrRd",
-        xticklabels=lines,
-        yticklabels=lengths,
-        ax=ax
+    # Use common heatmap function
+    return create_common_heatmap(
+        normalized_data,
+        lengths,
+        lines,
+        "Vulnerability Heatmap",
+        cmap='YlOrRd',
+        value_label='Normalized Vulnerability Score'
     )
+
+def create_bowler_economy_heatmap(line_length_stats):
+    """Create economy rate heatmap for bowler analysis"""
+    from src.data_processor import DataProcessor
     
-    # Add title and labels
-    ax.set_title(f"Vulnerability Heatmap", fontsize=14)
-    ax.set_xlabel("Line", fontsize=12)
-    ax.set_ylabel("Length", fontsize=12)
+    # Define display labels in the same order as numeric indices
+    lines = [DataProcessor.LINE_DISPLAY[i] for i in range(5)]
+    lengths = [DataProcessor.LENGTH_DISPLAY[i] for i in range(6)]
     
-    # Return the figure
-    return fig
+    # Initialize data matrix
+    data = np.zeros((len(lengths), len(lines)))
+    
+    # Fill in the data
+    for (line, length), stats in line_length_stats.items():
+        try:
+            # Find indices based on display values
+            col_idx = lines.index(line)
+            row_idx = lengths.index(length)
+            data[row_idx, col_idx] = stats['economy']
+        except (ValueError, IndexError):
+            continue
+    
+    return create_common_heatmap(
+        data,
+        lengths,
+        lines,
+        "Economy Rate by Line & Length",
+        cmap='YlOrRd',
+        value_label='Economy Rate'
+    )
+
+def create_bowler_strike_rate_heatmap(line_length_stats):
+    """Create strike rate heatmap for bowler analysis"""
+    from src.data_processor import DataProcessor
+    
+    # Define display labels in the same order as numeric indices
+    lines = [DataProcessor.LINE_DISPLAY[i] for i in range(5)]
+    lengths = [DataProcessor.LENGTH_DISPLAY[i] for i in range(6)]
+    
+    # Initialize data matrix
+    data = np.zeros((len(lengths), len(lines)))
+    
+    # Fill in the data
+    for (line, length), stats in line_length_stats.items():
+        try:
+            if stats['wickets'] > 0:
+                # Find indices based on display values
+                col_idx = lines.index(line)
+                row_idx = lengths.index(length)
+                data[row_idx, col_idx] = stats['strike_rate']
+        except (ValueError, IndexError):
+            continue
+    
+    return create_common_heatmap(
+        data,
+        lengths,
+        lines,
+        "Strike Rate by Line & Length",
+        cmap='YlOrRd',
+        value_label='Strike Rate'
+    )
 
 def create_field_placement_visualization(field_setting):
     """

@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from src.data_processor import DataProcessor
 
 class BowlerAnalyzer:
     """Analyzes bowler effectiveness with different lines and lengths"""
@@ -42,33 +43,35 @@ class BowlerAnalyzer:
             
             # Group by line and length
             if 'line' in bowler_data.columns and 'length' in bowler_data.columns:
-                for line in bowler_data['line'].unique():
-                    for length in bowler_data['length'].unique():
-                        if line == 'Unknown' or length == 'Unknown':
-                            continue
-                            
-                        line_length_data = bowler_data[
-                            (bowler_data['line'] == line) & 
-                            (bowler_data['length'] == length)
-                        ]
-                        
-                        if len(line_length_data) > 0:
-                            runs = line_length_data['score'].sum()
-                            balls = len(line_length_data)
-                            outs = line_length_data['out'].sum()
-                            
-                            eco = (runs / balls * 6) if balls > 0 else 0
-                            avg = (runs / outs) if outs > 0 else float('inf')
-                            sr = (balls / outs) if outs > 0 else float('inf')
-                            
-                            line_length_stats[(line, length)] = {
-                                'runs': runs,
-                                'balls': balls,
-                                'wickets': outs,
-                                'economy': eco,
-                                'average': avg,
-                                'strike_rate': sr
-                            }
+                ll_stats = (bowler_data
+                    .groupby(['line', 'length'], as_index=False)
+                    .agg({
+                        'score': 'sum',
+                        'out': 'sum'
+                    }).assign(balls=lambda x: 1)
+                )
+                
+                for _, row in ll_stats.iterrows():
+                    line = row['line']  # Already numeric 0-4
+                    length = row['length']  # Already numeric 0-5
+                    key = (line, length)
+                    
+                    runs = row['score']
+                    balls = row['balls']
+                    outs = row['out']
+                    
+                    eco = (runs / balls * 6) if balls > 0 else 0
+                    avg = (runs / outs) if outs > 0 else float('inf')
+                    sr = (balls / outs) if outs > 0 else float('inf')
+                    
+                    line_length_stats[key] = {
+                        'runs': int(runs),
+                        'balls': int(balls),
+                        'wickets': int(outs),
+                        'economy': eco,
+                        'average': avg,
+                        'strike_rate': sr
+                    }
             
             # Store profile
             profiles[bowler] = {
@@ -105,15 +108,18 @@ class BowlerAnalyzer:
                 continue
                 
             # Calculate effectiveness score (lower is better)
-            # Weighted combination of economy and strike rate
             if stats['wickets'] > 0:
                 effectiveness = (0.7 * stats['economy']) - (0.3 * (120 / stats['strike_rate']))
             else:
                 effectiveness = stats['economy']
             
+            # Use display mappings for line and length
+            line_display = DataProcessor.LINE_DISPLAY.get(int(line), 'Unknown')
+            length_display = DataProcessor.LENGTH_DISPLAY.get(int(length), 'Unknown')
+            
             recommendations.append({
-                'line': line,
-                'length': length,
+                'line': line_display,
+                'length': length_display,
                 'effectiveness': effectiveness,
                 'economy': stats['economy'],
                 'strike_rate': stats['strike_rate'] if stats['wickets'] > 0 else float('inf'),

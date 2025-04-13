@@ -2,6 +2,7 @@
 
 import pandas as pd
 import numpy as np
+from src.data_processor import DataProcessor
 
 class BowlingPlanGenerator:
     """
@@ -254,10 +255,14 @@ class BowlingPlanGenerator:
             
             if best_line_lengths and best_line_lengths[0][1] < profile['average'] * 0.7:
                 combo, avg = best_line_lengths[0]
+                line_num, length_num = combo
+                line_display = DataProcessor.LINE_DISPLAY.get(line_num, 'Unknown')
+                length_display = DataProcessor.LENGTH_DISPLAY.get(length_num, 'Unknown')
+
                 weaknesses.append({
                     'type': 'line_length',
-                    'line': combo[0],
-                    'length': combo[1],
+                    'line': line_display,
+                    'length': length_display,
                     'average': avg,
                     'overall_average': profile['average'],
                     'confidence': 'high' if profile['vs_line_length'][combo]['balls'] > 20 else 'medium'
@@ -523,57 +528,57 @@ class BowlingPlanGenerator:
             'description': ''
         }
         
-        # Default field settings by phase
+        # If we have recommendations, get the top line/length combination
+        if recommendations and len(recommendations) > 0:
+            top_rec = recommendations[0]
+            line = top_rec.get('line')
+            length = top_rec.get('length')
+            
+            # Adjust field based on line
+            if line == 'Wide Outside Off' or line == 'Outside Off':
+                field_setting['catching_positions'].extend(['slip', 'gully', 'point'])
+                field_setting['boundary_riders'].extend(['third man', 'deep cover'])
+                field_setting['description'] = 'Off-side dominant field'
+            
+            elif line == 'On Stumps':
+                if length == 'Short Good Length' or length == 'Short':
+                    field_setting['catching_positions'].extend(['square leg', 'midwicket'])
+                    field_setting['description'] = 'Short ball field with leg-side catchers'
+                else:
+                    field_setting['catching_positions'].extend(['mid-on', 'mid-off'])
+                    field_setting['description'] = 'Straight field for wicket-to-wicket bowling'
+            
+            elif line == 'Down Leg' or line == 'Wide Down Leg':
+                field_setting['catching_positions'].extend(['square leg', 'fine leg'])
+                field_setting['boundary_riders'].extend(['deep square leg', 'deep fine leg'])
+                field_setting['description'] = 'Leg-side dominant field'
+                
+            # Adjust based on length
+            if length == 'Full Toss' or length == 'Yorker':
+                field_setting['catching_positions'].extend(['mid-on', 'mid-off'])
+                field_setting['description'] += ' with straight catchers for full bowling'
+            elif length == 'Good Length':
+                field_setting['catching_positions'].extend(['silly point', 'short leg'])
+                field_setting['description'] += ' with close-in catchers'
+        
+        # Phase-specific adjustments
         if phase == 1:  # Powerplay
             field_setting['boundary_riders'] = ['deep square leg', 'deep point', 'long-off', 'deep fine leg']
-            field_setting['description'] = 'Defensive field with 4 boundary riders as per powerplay restrictions'
+            field_setting['description'] += ' - Defensive field with 4 boundary riders as per powerplay restrictions'
             
         elif phase == 2:  # Middle overs
             field_setting['boundary_riders'] = ['deep square leg', 'deep midwicket', 'long-on', 'long-off', 'deep cover']
             
             if bowler_type and 'spin' in bowler_type.lower():
-                field_setting['catching_positions'] = ['slip', 'short leg', 'silly point']
-                field_setting['description'] = 'Attacking field for spin with close catchers and boundary protection'
+                field_setting['catching_positions'].extend(['slip', 'short leg', 'silly point'])
+                field_setting['description'] += ' - Attacking field for spin with close catchers and boundary protection'
             else:
-                field_setting['catching_positions'] = ['slip', 'gully']
-                field_setting['description'] = 'Balanced field with catching positions and boundary protection'
+                field_setting['catching_positions'].extend(['slip', 'gully'])
+                field_setting['description'] += ' - Balanced field with catching positions and boundary protection'
                 
         elif phase == 3:  # Death overs
             field_setting['boundary_riders'] = ['deep square leg', 'deep midwicket', 'long-on', 'long-off', 'deep cover', 'third man']
-            field_setting['description'] = 'Defensive field focused on boundary protection for death overs'
-            
-        # Adjust based on recommended line and length
-        if recommendations and len(recommendations) > 0:
-            top_rec = recommendations[0]
-            
-            # Adjust field based on line and length combination
-            line = top_rec.get('line')
-            length = top_rec.get('length')
-            
-            if line == 'Off':
-                if length == 'Short':
-                    field_setting['catching_positions'].extend(['gully', 'point'])
-                    field_setting['boundary_riders'].extend(['third man', 'deep cover'])
-                    field_setting['description'] += ' - Focus on off side with protection for cut shots'
-                elif length == 'Good':
-                    field_setting['catching_positions'].extend(['slip', 'gully'])
-                    field_setting['description'] += ' - Classic off stump line with catching cordon'
-                elif length == 'Yorker':
-                    field_setting['catching_positions'].extend(['mid-off', 'cover'])
-                    field_setting['description'] += ' - Full at off stump with catching positions in front of wicket'
-            
-            elif line == 'Middle':
-                if length == 'Short':
-                    field_setting['catching_positions'].extend(['square leg', 'midwicket'])
-                    field_setting['description'] += ' - Attacking body with leg side catchers'
-                elif length == 'Yorker':
-                    field_setting['catching_positions'].extend(['mid-on', 'mid-off'])
-                    field_setting['description'] += ' - Full and straight with straight catchers'
-            
-            elif line == 'Leg':
-                field_setting['catching_positions'].extend(['square leg', 'midwicket'])
-                field_setting['boundary_riders'].extend(['deep square leg', 'deep midwicket'])
-                field_setting['description'] += ' - Target leg stump with leg side emphasis'
+            field_setting['description'] += ' - Defensive field focused on boundary protection for death overs'
         
         # Remove duplicates
         field_setting['catching_positions'] = list(set(field_setting['catching_positions']))

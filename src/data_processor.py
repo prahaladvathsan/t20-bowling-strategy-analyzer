@@ -6,6 +6,24 @@ class DataProcessor:
     Class for cleaning and preprocessing raw ball-by-ball T20 cricket data.
     """
     
+    # Add class-level display mappings that can be accessed by other modules
+    LINE_DISPLAY = {
+        0: 'Wide Outside Off',
+        1: 'Outside Off',
+        2: 'On Stumps',
+        3: 'Down Leg',
+        4: 'Wide Down Leg'
+    }
+    
+    LENGTH_DISPLAY = {
+        0: 'Full Toss',
+        1: 'Yorker',
+        2: 'Full',
+        3: 'Good Length',
+        4: 'Short Good Length',
+        5: 'Short'
+    }
+    
     def __init__(self, data):
         """
         Initialize the DataProcessor with raw data.
@@ -106,13 +124,7 @@ class DataProcessor:
     def _standardize_columns(self, df):
         """
         Standardize column values for consistency.
-        
-        Parameters:
-        -----------
-        df : pandas.DataFrame
-            DataFrame to process
         """
-        
         # Standardize bowling line
         if 'line' in df.columns:
             LINE_MAPPING = {
@@ -122,38 +134,58 @@ class DataProcessor:
                 'DOWN_LEG': 3, 
                 'WIDE_DOWN_LEG': 4
             }
-            # Create a reverse mapping to standardize values
-            reverse_line_mapping = {v: k for k, v in LINE_MAPPING.items()}
             
-            # If the value is already a number, use reverse mapping
-            # Otherwise, convert to uppercase and use as is
-            df['line_code'] = df['line'].apply(
-                lambda x: x if pd.isna(x) else (
-                    reverse_line_mapping.get(x, x) if isinstance(x, (int, float)) else str(x).upper()
-                )
-            )
+            LINE_DISPLAY = {
+                0: 'Wide Outside Off',
+                1: 'Outside Off',
+                2: 'On Stumps',
+                3: 'Down Leg',
+                4: 'Wide Down Leg'
+            }
+            
+            # Convert all values to uppercase strings first
+            df['line'] = df['line'].astype(str).str.upper()
+            
+            # Store original values in _code columns
+            df['line_code'] = df['line']
+            
+            # First map to numeric values
+            df['line'] = df['line'].map(lambda x: LINE_MAPPING.get(x, 2))  # Default to 2 (ON_THE_STUMPS) for unknown
+            
+            # Create display column for visualization
+            df['line_display'] = df['line'].map(lambda x: LINE_DISPLAY.get(x, 'On Stumps'))
         
         # Standardize bowling length
         if 'length' in df.columns:
             LENGTH_MAPPING = {
-                'FULL_TOSS': 0, 
-                'YORKER': 1, 
-                'FULL': 2, 
-                'GOOD_LENGTH': 3, 
-                'SHORT_OF_A_GOOD_LENGTH': 4, 
+                'FULL_TOSS': 0,
+                'YORKER': 1,
+                'FULL': 2,
+                'GOOD_LENGTH': 3,
+                'SHORT_OF_A_GOOD_LENGTH': 4,
                 'SHORT': 5
             }
-            # Create a reverse mapping to standardize values
-            reverse_length_mapping = {v: k for k, v in LENGTH_MAPPING.items()}
             
-            # If the value is already a number, use reverse mapping
-            # Otherwise, convert to uppercase and use as is
-            df['length_code'] = df['length'].apply(
-                lambda x: x if pd.isna(x) else (
-                    reverse_length_mapping.get(x, x) if isinstance(x, (int, float)) else str(x).upper()
-                )
-            )
-    
+            LENGTH_DISPLAY = {
+                0: 'Full Toss',
+                1: 'Yorker',
+                2: 'Full',
+                3: 'Good Length',
+                4: 'Short Good Length',
+                5: 'Short'
+            }
+            
+            # Convert all values to uppercase strings first
+            df['length'] = df['length'].astype(str).str.upper()
+            
+            # Store original values in _code columns
+            df['length_code'] = df['length']
+            
+            # First map to numeric values
+            df['length'] = df['length'].map(lambda x: LENGTH_MAPPING.get(x, 3))  # Default to 3 (GOOD_LENGTH) for unknown
+            
+            # Create display column for visualization
+            df['length_display'] = df['length'].map(lambda x: LENGTH_DISPLAY.get(x, 'Good Length'))
     
     def _validate_required_columns(self, df):
         """
