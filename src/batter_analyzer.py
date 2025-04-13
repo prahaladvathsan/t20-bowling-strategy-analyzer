@@ -7,15 +7,7 @@ class BatterVulnerabilityAnalyzer:
     
     def __init__(self, data):
         """Initialize with ball-by-ball dataset"""
-        # Make a copy of the data to avoid modifying the original
         self.data = data.copy()
-        
-        # Import display mappings
-        self.line_display = DataProcessor.LINE_DISPLAY
-        self.length_display = DataProcessor.LENGTH_DISPLAY
-        
-        # Print columns in dataset for debugging
-        print(f"Columns in dataset: {list(self.data.columns)}")
         
         # Check for critical columns
         required_cols = ['bat', 'score', 'out']
@@ -23,10 +15,6 @@ class BatterVulnerabilityAnalyzer:
         if missing_cols:
             raise ValueError(f"Missing required columns: {missing_cols}")
         
-        # Ensure we have bowling style information
-        if 'bowl_style' not in self.data.columns:
-            print("WARNING: 'bowl_style' column not found in dataset. This will limit analysis capabilities.")
-            
         # Pre-calculate profiles
         self.batter_profiles = self._create_batter_profiles()
         
@@ -34,160 +22,28 @@ class BatterVulnerabilityAnalyzer:
         """Create profiles for batters based on their performance"""
         profiles = {}
         
-        # Process each batter
         for batter, batter_data in self.data.groupby('bat'):
             try:
-                print(f"Processing batter: {batter}")
-                
                 # Basic stats
                 total_runs = batter_data['score'].sum()
                 total_balls = len(batter_data)
                 dismissals = batter_data['out'].sum()
                 
                 # Get batting hand if available
-                bat_hand = "Unknown"
-                if 'bat_hand' in batter_data.columns and not batter_data['bat_hand'].isna().all():
-                    bat_hand = batter_data['bat_hand'].mode().iloc[0]
+                bat_hand = batter_data['bat_hand'].mode().iloc[0] if 'bat_hand' in batter_data.columns else "Unknown"
                 
-                # Calculate strike rate and average
-                strike_rate = (total_runs / total_balls * 100) if total_balls > 0 else 0
-                average = (total_runs / dismissals) if dismissals > 0 else float('inf')
+                # Use utility functions for calculations
+                strike_rate = DataProcessor.calculate_strike_rate(total_runs, total_balls)
+                average = DataProcessor.calculate_average(total_runs, dismissals)
                 
-                # Initialize storage dictionaries
-                phase_stats = {}
-                bowl_kind_dict = {}
-                bowl_style_dict = {}
-                line_length_stats = {}
-                phase_bowl_style_stats = {}
+                # Process phase data
+                phase_stats = self._process_phase_data(batter_data)
                 
-                # Process phase data if available
-                if 'phase' in batter_data.columns:
-                    for phase, phase_data in batter_data.groupby('phase'):
-                        if len(phase_data) > 0:
-                            runs = phase_data['score'].sum()
-                            balls = len(phase_data)
-                            outs = phase_data['out'].sum()
-                            sr = (runs / balls * 100) if balls > 0 else 0
-                            avg = (runs / outs) if outs > 0 else float('inf')
-                            
-                            phase_stats[phase] = {
-                                'runs': int(runs),
-                                'balls': int(balls),
-                                'dismissals': int(outs),
-                                'strike_rate': sr,
-                                'average': avg
-                            }
+                # Process bowling style data
+                bowl_style_dict = self._process_bowling_style_data(batter_data)
                 
-                # Process bowling kind data if available
-                if 'bowl_kind' in batter_data.columns:
-                    for bowl_kind, kind_data in batter_data.groupby('bowl_kind'):
-                        if pd.isna(bowl_kind) or bowl_kind == '':
-                            continue
-                            
-                        runs = kind_data['score'].sum()
-                        balls = len(kind_data)
-                        outs = kind_data['out'].sum()
-                        sr = (runs / balls * 100) if balls > 0 else 0
-                        avg = (runs / outs) if outs > 0 else float('inf')
-                        
-                        bowl_kind_dict[bowl_kind] = {
-                            'runs': int(runs),
-                            'balls': int(balls),
-                            'dismissals': int(outs),
-                            'strike_rate': sr,
-                            'average': avg
-                        }
-                
-                # Process bowling style data manually to ensure it works
-                if 'bowl_style' in batter_data.columns:
-                    print(f"Processing bowling styles for {batter}")
-                    unique_styles = batter_data['bowl_style'].unique()
-                    print(f"  Unique styles: {unique_styles}")
-                    
-                    for style in unique_styles:
-                        # Skip empty or invalid styles
-                        if pd.isna(style) or style == '-' or style == '':
-                            continue
-                        
-                        # Get data for this style
-                        style_data = batter_data[batter_data['bowl_style'] == style]
-                        
-                        runs = style_data['score'].sum()
-                        balls = len(style_data)
-                        outs = style_data['out'].sum()
-                        
-                        # Only include if we have reasonable sample size
-                        if balls >= 3:
-                            sr = (runs / balls * 100) if balls > 0 else 0
-                            avg = (runs / outs) if outs > 0 else float('inf')
-                            
-                            print(f"  Adding style {style}: {balls} balls, {runs} runs, SR {sr:.2f}")
-                            
-                            bowl_style_dict[style] = {
-                                'runs': int(runs),
-                                'balls': int(balls),
-                                'dismissals': int(outs),
-                                'strike_rate': sr,
-                                'average': avg
-                            }
-                
-                    print(f"  Total styles added: {len(bowl_style_dict)}")
-                
-                # Process line and length data if available
-                if all(col in batter_data.columns for col in ['line', 'length']):
-                    for (line, length), ll_data in batter_data.groupby(['line', 'length']):
-                        if pd.isna(line) or pd.isna(length):
-                            continue
-                            
-                        runs = ll_data['score'].sum()
-                        balls = len(ll_data)
-                        outs = ll_data['out'].sum()
-                        
-                        if balls >= 3:
-                            sr = (runs / balls * 100) if balls > 0 else 0
-                            avg = (runs / outs) if outs > 0 else float('inf')
-                            
-                            # Convert line and length to display values
-                            line_display = self.line_display.get(int(line), 'Unknown')
-                            length_display = self.length_display.get(int(length), 'Unknown')
-                            
-                            line_length_stats[(line_display, length_display)] = {
-                                'runs': int(runs),
-                                'balls': int(balls),
-                                'dismissals': int(outs),
-                                'strike_rate': sr,
-                                'average': avg
-                            }
-                
-                # Process phase-specific bowling style data if both columns exist
-                if all(col in batter_data.columns for col in ['phase', 'bowl_style']):
-                    for phase, phase_data in batter_data.groupby('phase'):
-                        if len(phase_data) < 5:
-                            continue
-                            
-                        phase_bowl_style_stats[phase] = {}
-                        
-                        for style in phase_data['bowl_style'].unique():
-                            if pd.isna(style) or style == '-' or style == '':
-                                continue
-                                
-                            style_phase_data = phase_data[phase_data['bowl_style'] == style]
-                            
-                            runs = style_phase_data['score'].sum()
-                            balls = len(style_phase_data)
-                            outs = style_phase_data['out'].sum()
-                            
-                            if balls >= 3:
-                                sr = (runs / balls * 100) if balls > 0 else 0
-                                avg = (runs / outs) if outs > 0 else float('inf')
-                                
-                                phase_bowl_style_stats[phase][style] = {
-                                    'runs': int(runs),
-                                    'balls': int(balls),
-                                    'dismissals': int(outs),
-                                    'strike_rate': sr,
-                                    'average': avg
-                                }
+                # Process line and length data
+                line_length_stats = self._process_line_length_data(batter_data)
                 
                 # Store the complete profile
                 profiles[batter] = {
@@ -197,24 +53,89 @@ class BatterVulnerabilityAnalyzer:
                     'dismissals': int(dismissals),
                     'strike_rate': strike_rate,
                     'average': average,
-                    'by_phase': phase_stats if phase_stats else None,
-                    'vs_bowler_types': bowl_kind_dict if bowl_kind_dict else None,
-                    'vs_bowler_styles': bowl_style_dict if bowl_style_dict else None,
-                    'vs_line_length': line_length_stats if line_length_stats else None,
-                    'phase_bowl_style': phase_bowl_style_stats if phase_bowl_style_stats else None
+                    'by_phase': phase_stats,
+                    'vs_bowler_styles': bowl_style_dict,
+                    'vs_line_length': line_length_stats
                 }
-                
-                # Debug output
-                # if 'vs_bowler_styles' in profiles[batter]:
-                #    print(f"Final vs_bowler_styles for {batter} has {len(profiles[batter]['vs_bowler_styles'] or {})} entries")
                 
             except Exception as e:
                 print(f"Error processing batter {batter}: {str(e)}")
-                import traceback
-                traceback.print_exc()
                 continue
         
         return profiles
+
+    def _process_phase_data(self, batter_data):
+        """Process phase-specific data for a batter"""
+        phase_stats = {}
+        
+        if 'phase' in batter_data.columns:
+            for phase, phase_data in batter_data.groupby('phase'):
+                if len(phase_data) > 0:
+                    runs = phase_data['score'].sum()
+                    balls = len(phase_data)
+                    outs = phase_data['out'].sum()
+                    
+                    phase_stats[phase] = {
+                        'runs': int(runs),
+                        'balls': int(balls),
+                        'dismissals': int(outs),
+                        'strike_rate': DataProcessor.calculate_strike_rate(runs, balls),
+                        'average': DataProcessor.calculate_average(runs, outs)
+                    }
+        
+        return phase_stats if phase_stats else None
+    
+    def _process_bowling_style_data(self, batter_data):
+        """Process bowling style matchup data for a batter"""
+        bowl_style_dict = {}
+        
+        if 'bowl_style' in batter_data.columns:
+            for style in batter_data['bowl_style'].unique():
+                if pd.isna(style) or style == '-' or style == '':
+                    continue
+                
+                style_data = batter_data[batter_data['bowl_style'] == style]
+                runs = style_data['score'].sum()
+                balls = len(style_data)
+                outs = style_data['out'].sum()
+                
+                if balls >= 3:
+                    bowl_style_dict[style] = {
+                        'runs': int(runs),
+                        'balls': int(balls),
+                        'dismissals': int(outs),
+                        'strike_rate': DataProcessor.calculate_strike_rate(runs, balls),
+                        'average': DataProcessor.calculate_average(runs, outs)
+                    }
+        
+        return bowl_style_dict if bowl_style_dict else None
+    
+    def _process_line_length_data(self, batter_data):
+        """Process line and length data for a batter"""
+        line_length_stats = {}
+        
+        if all(col in batter_data.columns for col in ['line', 'length']):
+            for (line, length), ll_data in batter_data.groupby(['line', 'length']):
+                if pd.isna(line) or pd.isna(length):
+                    continue
+                    
+                runs = ll_data['score'].sum()
+                balls = len(ll_data)
+                outs = ll_data['out'].sum()
+                
+                if balls >= 3:
+                    line_display = DataProcessor.LINE_DISPLAY.get(int(line), 'Unknown')
+                    length_display = DataProcessor.LENGTH_DISPLAY.get(int(length), 'Unknown')
+                    
+                    line_length_stats[(line_display, length_display)] = {
+                        'runs': int(runs),
+                        'balls': int(balls),
+                        'dismissals': int(outs),
+                        'strike_rate': DataProcessor.calculate_strike_rate(runs, balls),
+                        'average': DataProcessor.calculate_average(runs, outs)
+                    }
+        
+        return line_length_stats if line_length_stats else None
     
     def analyze_batter(self, batter):
         """Return complete analysis for a specific batter"""

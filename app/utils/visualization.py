@@ -3,34 +3,11 @@ import seaborn as sns
 import streamlit as st
 import pandas as pd
 import numpy as np
-import io
+from matplotlib.lines import Line2D
+from src.data_processor import DataProcessor
 
 def create_common_heatmap(data, row_labels, col_labels, title, cmap='YlOrRd', value_label='Value', ball_counts=None):
-    """
-    Common function to create heatmaps with consistent styling
-    
-    Parameters:
-    -----------
-    data : numpy.ndarray
-        2D array of values to display
-    row_labels : list
-        Labels for rows (y-axis)
-    col_labels : list
-        Labels for columns (x-axis)
-    title : str
-        Title of the heatmap
-    cmap : str
-        Matplotlib colormap name
-    value_label : str
-        Label for the colorbar
-    ball_counts : numpy.ndarray, optional
-        2D array of ball counts to display in brackets
-        
-    Returns:
-    --------
-    matplotlib.figure.Figure
-    """
-    # Create figure and axes with specified size
+    """Common function to create heatmaps with consistent styling"""
     fig, ax = plt.subplots(figsize=(12, 8))
     
     # Create heatmap using imshow
@@ -39,90 +16,77 @@ def create_common_heatmap(data, row_labels, col_labels, title, cmap='YlOrRd', va
     # Add colorbar
     cbar = ax.figure.colorbar(im, ax=ax)
     cbar.ax.set_ylabel(value_label, rotation=-90, va="bottom")
-
+    
     # Add text annotations
     for i in range(len(row_labels)):
         for j in range(len(col_labels)):
             value = data[i, j]
-            # Add ball count if provided
+            text = f'{value:.2f}'
             if ball_counts is not None:
-                count = ball_counts[i, j]
-                text = ax.text(j, i, f'{value:.2f}\n({int(count)})',
-                         ha="center", va="center",
-                         color="black" if value < np.max(data) * 0.7 else "white",
-                         fontweight='bold',
-                         fontsize=8)
-            else:
-                text = ax.text(j, i, f'{value:.2f}',
-                         ha="center", va="center",
-                         color="black" if value < np.max(data) * 0.7 else "white",
-                         fontweight='bold')
+                text += f'\n({int(ball_counts[i, j])})'
+            
+            ax.text(j, i, text,
+                ha="center", va="center",
+                color="black" if value < np.max(data) * 0.7 else "white",
+                fontweight='bold',
+                fontsize=8)
 
     # Configure axis labels and ticks
     ax.set_xticks(np.arange(len(col_labels)))
     ax.set_yticks(np.arange(len(row_labels)))
     ax.set_xticklabels(col_labels)
     ax.set_yticklabels(row_labels)
-
-    # Rotate and align the tick labels so they look better
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
     
-    # Add title and labels
     ax.set_title(title, fontsize=14, pad=20)
     ax.set_xlabel("Line", fontsize=12)
     ax.set_ylabel("Length", fontsize=12)
-
-    # Adjust layout to prevent label cutoff
     plt.tight_layout()
     
     return fig
 
-def create_vulnerability_heatmap(batter_data):
-    """
-    Create a heatmap showing a batter's vulnerability to different line/length combinations
-    """
-    from src.data_processor import DataProcessor
-    
-    # Define display labels in the same order as numeric indices
+def process_line_length_data(stats_dict, data_type='vulnerability'):
+    """Process line/length data for heatmap creation"""
     lines = [DataProcessor.LINE_DISPLAY[i] for i in range(5)]
     lengths = [DataProcessor.LENGTH_DISPLAY[i] for i in range(6)]
     
-    # Initialize data matrices
-    data = np.zeros((6, 5))  # 6 lengths x 5 lines
+    data = np.zeros((6, 5))
     ball_counts = np.zeros((6, 5))
     
-    # Extract line-length data
-    line_length_stats = batter_data.get('vs_line_length', {})
-    
-    # Fill in the data where we have values
-    if line_length_stats:
-        for (line, length), stats in line_length_stats.items():
+    if stats_dict:
+        for (line, length), stats in stats_dict.items():
             try:
-                # Find indices based on display values
                 col_idx = lines.index(line)
                 row_idx = lengths.index(length)
                 
-                # Calculate vulnerability score
-                if stats['dismissals'] > 0:
-                    vulnerability = 100 / stats['average']
-                else:
-                    # If no dismissals, use strike rate (lower = more vulnerable)
-                    vulnerability = 100 / stats['strike_rate'] if stats['strike_rate'] > 0 else 0
-                
-                data[row_idx, col_idx] = vulnerability
-                ball_counts[row_idx, col_idx] = stats['balls']
+                if stats['balls'] >= 3:
+                    if data_type == 'vulnerability':
+                        value = (100 / stats['average']) if stats['dismissals'] > 0 else (100 / stats['strike_rate'])
+                    elif data_type == 'economy':
+                        value = stats['economy']
+                    elif data_type == 'strike_rate':
+                        value = stats['bowling_strike_rate'] if stats.get('wickets', 0) > 0 else 0
+                    
+                    data[row_idx, col_idx] = value
+                    ball_counts[row_idx, col_idx] = stats['balls']
             except (ValueError, IndexError):
                 continue
     
-    # Normalize data for better visualization
-    max_vulnerability = np.max(data) if np.max(data) > 0 else 1
-    normalized_data = data / max_vulnerability if max_vulnerability > 0 else data
+    return data, ball_counts, lines, lengths
+
+def create_vulnerability_heatmap(batter_data):
+    """Create a heatmap showing a batter's vulnerability to different line/length combinations"""
+    data, ball_counts, lines, lengths = process_line_length_data(
+        batter_data.get('vs_line_length', {}), 
+        'vulnerability'
+    )
     
-    # Use common heatmap function
+    # Normalize vulnerability scores
+    max_value = np.max(data) if np.max(data) > 0 else 1
+    normalized_data = data / max_value if max_value > 0 else data
+    
     return create_common_heatmap(
-        normalized_data,
-        lengths,
-        lines,
+        normalized_data, lengths, lines,
         "Vulnerability Heatmap",
         cmap='YlOrRd',
         value_label='Normalized Vulnerability Score',
@@ -131,34 +95,13 @@ def create_vulnerability_heatmap(batter_data):
 
 def create_bowler_economy_heatmap(line_length_stats):
     """Create economy rate heatmap for bowler analysis"""
-    from src.data_processor import DataProcessor
-    
-    # Define display labels in the same order as numeric indices
-    lines = [DataProcessor.LINE_DISPLAY[i] for i in range(5)]
-    lengths = [DataProcessor.LENGTH_DISPLAY[i] for i in range(6)]
-    
-    # Initialize data matrices
-    data = np.zeros((len(lengths), len(lines)))
-    ball_counts = np.zeros((len(lengths), len(lines)))
-    
-    # Fill in the data
-    for (line, length), stats in line_length_stats.items():
-        try:
-            # Find indices based on display values
-            col_idx = lines.index(line)
-            row_idx = lengths.index(length)
-            
-            # Use economy rate for heat value
-            if stats['balls'] >= 3:  # Minimum sample size
-                data[row_idx, col_idx] = stats['economy']
-                ball_counts[row_idx, col_idx] = stats['balls']
-        except (ValueError, IndexError):
-            continue
+    data, ball_counts, lines, lengths = process_line_length_data(
+        line_length_stats, 
+        'economy'
+    )
     
     return create_common_heatmap(
-        data,
-        lengths,
-        lines,
+        data, lengths, lines,
         "Economy Rate by Line & Length",
         cmap='YlOrRd',
         value_label='Economy Rate (runs/over)',
@@ -166,110 +109,70 @@ def create_bowler_economy_heatmap(line_length_stats):
     )
 
 def create_bowler_strike_rate_heatmap(line_length_stats):
-    """Create bowling strike rate heatmap for bowler analysis (balls/wicket)"""
-    from src.data_processor import DataProcessor
+    """Create bowling strike rate heatmap for bowler analysis"""
+    data, ball_counts, lines, lengths = process_line_length_data(
+        line_length_stats, 
+        'strike_rate'
+    )
     
-    # Define display labels in the same order as numeric indices
-    lines = [DataProcessor.LINE_DISPLAY[i] for i in range(5)]
-    lengths = [DataProcessor.LENGTH_DISPLAY[i] for i in range(6)]
-    
-    # Initialize data matrices
-    data = np.zeros((len(lengths), len(lines)))
-    ball_counts = np.zeros((len(lengths), len(lines)))
-    max_sr = 0  # Track maximum bowling strike rate for normalization
-    
-    # Fill in the data
-    for (line, length), stats in line_length_stats.items():
-        try:
-            # Find indices based on display values
-            col_idx = lines.index(line)
-            row_idx = lengths.index(length)
-            
-            # Only include if we have wickets and enough balls
-            if stats['wickets'] > 0 and stats['balls'] >= 3:
-                sr = stats['bowling_strike_rate']  # Using bowling strike rate (balls/wicket)
-                data[row_idx, col_idx] = sr
-                ball_counts[row_idx, col_idx] = stats['balls']
-                max_sr = max(max_sr, sr)
-        except (ValueError, IndexError):
-            continue
-    
-    # Normalize bowling strike rates for better visualization (lower is better)
+    # Normalize strike rates (lower is better)
+    max_sr = np.max(data) if np.max(data) > 0 else 1
     if max_sr > 0:
         data = np.where(data > 0, max_sr - data, 0)
     
     return create_common_heatmap(
-        data,
-        lengths,
-        lines,
+        data, lengths, lines,
         "Bowling Strike Rate by Line & Length",
         cmap='YlOrRd',
         value_label='Bowling Strike Rate (balls/wicket)',
         ball_counts=ball_counts
     )
 
+# Field positions for visualization
+FIELD_POSITIONS = {
+    'wicketkeeper': (0, -0.25),
+    'slip': (0.1, -0.25),
+    'gully': (0.2, -0.2),
+    'point': (0.4, 0),
+    'cover': (0.3, 0.3),
+    'mid-off': (0.1, 0.4),
+    'mid-on': (-0.1, 0.4),
+    'midwicket': (-0.3, 0.3),
+    'square leg': (-0.4, 0),
+    'fine leg': (-0.2, -0.2),
+    'third man': (0.5, -0.5),
+    'deep cover': (0.5, 0.5),
+    'long-off': (0, 0.8),
+    'long-on': (0, 0.8),
+    'deep midwicket': (-0.5, 0.5),
+    'deep fine leg': (-0.5, -0.5),
+    'short leg': (0.05, 0.1),
+    'silly point': (0.1, 0.1),
+    'leg slip': (-0.1, -0.25)
+}
+
 def create_field_placement_visualization(field_setting):
-    """
-    Create a visual representation of recommended field placements
-    
-    Parameters:
-    -----------
-    field_setting : dict
-        Dictionary with field placement recommendations
-    
-    Returns:
-    --------
-    fig : matplotlib figure
-    """
-    # Create figure and axis
+    """Create a visual representation of recommended field placements"""
     fig, ax = plt.subplots(figsize=(10, 10))
     
-    # Draw cricket field (circle)
-    circle = plt.Circle((0, 0), 1, fill=False, color='green', linewidth=2)
-    ax.add_patch(circle)
+    # Draw cricket field
+    ax.add_patch(plt.Circle((0, 0), 1, fill=False, color='green', linewidth=2))
+    ax.add_patch(plt.Rectangle((-0.05, -0.2), 0.1, 0.4, fill=True, color='brown'))
     
-    # Draw pitch rectangle
-    rect = plt.Rectangle((-0.05, -0.2), 0.1, 0.4, fill=True, color='brown')
-    ax.add_patch(rect)
+    # Plot wicketkeeper
+    ax.plot(*FIELD_POSITIONS['wicketkeeper'], 'ko', ms=10)
+    ax.text(*FIELD_POSITIONS['wicketkeeper'], 'WK', fontsize=8, ha='center', va='bottom')
     
-    # Field positions
-    field_positions = {
-        'wicketkeeper': (0, -0.25),
-        'slip': (0.1, -0.25),
-        'gully': (0.2, -0.2),
-        'point': (0.4, 0),
-        'cover': (0.3, 0.3),
-        'mid-off': (0.1, 0.4),
-        'mid-on': (-0.1, 0.4),
-        'midwicket': (-0.3, 0.3),
-        'square leg': (-0.4, 0),
-        'fine leg': (-0.2, -0.2),
-        'third man': (0.5, -0.5),
-        'deep cover': (0.5, 0.5),
-        'long-off': (0, 0.8),
-        'long-on': (0, 0.8),
-        'deep midwicket': (-0.5, 0.5),
-        'deep fine leg': (-0.5, -0.5),
-        'short leg': (0.05, 0.1),
-        'silly point': (0.1, 0.1),
-        'leg slip': (-0.1, -0.25)
-    }
-    
-    # Always show wicketkeeper
-    ax.plot(*field_positions['wicketkeeper'], 'ko', ms=10)
-    ax.text(*field_positions['wicketkeeper'], 'WK', fontsize=8, ha='center', va='bottom')
-    
-    # Show catching positions
+    # Plot field positions
     for position in field_setting.get('catching_positions', []):
-        if position in field_positions:
-            ax.plot(*field_positions[position], 'yo', ms=10)
-            ax.text(*field_positions[position], position, fontsize=8, ha='center', va='bottom')
+        if position in FIELD_POSITIONS:
+            ax.plot(*FIELD_POSITIONS[position], 'yo', ms=10)
+            ax.text(*FIELD_POSITIONS[position], position, fontsize=8, ha='center', va='bottom')
     
-    # Show boundary riders
     for position in field_setting.get('boundary_riders', []):
-        if position in field_positions:
-            ax.plot(*field_positions[position], 'bo', ms=10)
-            ax.text(*field_positions[position], position, fontsize=8, ha='center', va='bottom')
+        if position in FIELD_POSITIONS:
+            ax.plot(*FIELD_POSITIONS[position], 'bo', ms=10)
+            ax.text(*FIELD_POSITIONS[position], position, fontsize=8, ha='center', va='bottom')
     
     # Set plot properties
     ax.set_xlim(-1.2, 1.2)
@@ -277,15 +180,12 @@ def create_field_placement_visualization(field_setting):
     ax.set_aspect('equal')
     ax.axis('off')
     
-    # Add title
     plt.title(field_setting.get('description', 'Recommended Field Placement'), fontsize=14)
     
     # Add legend
-    from matplotlib.lines import Line2D
     legend_elements = [
-        Line2D([0], [0], marker='o', color='w', markerfacecolor='y', markersize=10, label='Catching Position'),
-        Line2D([0], [0], marker='o', color='w', markerfacecolor='b', markersize=10, label='Boundary Rider'),
-        Line2D([0], [0], marker='o', color='w', markerfacecolor='k', markersize=10, label='Wicketkeeper')
+        Line2D([0], [0], marker='o', color='w', markerfacecolor=c, markersize=10, label=l)
+        for c, l in [('y', 'Catching Position'), ('b', 'Boundary Rider'), ('k', 'Wicketkeeper')]
     ]
     ax.legend(handles=legend_elements, loc='upper center', bbox_to_anchor=(0.5, -0.05), ncol=3)
     

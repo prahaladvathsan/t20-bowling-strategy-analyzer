@@ -24,6 +24,78 @@ from utils.visualization import (
     create_bowler_strike_rate_heatmap
 )
 
+def load_and_process_data():
+    """Centralized function to load and process data"""
+    try:
+        data_path = Path(__file__).parent.parent / "data" / "t20_bbb.csv"
+        if not data_path.exists():
+            raise FileNotFoundError("Data file not found. Please ensure t20_bbb.csv exists in the data directory.")
+            
+        # Load data with low_memory=False to handle mixed types
+        data = pd.read_csv(data_path, low_memory=False)
+        
+        # Validate required columns
+        required_columns = ['p_match', 'bat', 'bowl', 'line', 'length', 'phase', 'score', 'out']
+        missing_columns = [col for col in required_columns if col not in data.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {', '.join(missing_columns)}")
+        
+        # Process data
+        data_processor = DataProcessor(data)
+        processed_data = data_processor.process()
+        
+        return processed_data, None
+    except Exception as e:
+        return None, str(e)
+
+def initialize_analyzers(data):
+    """Centralized function to initialize all analyzers"""
+    try:
+        # Initialize with required columns for batter analysis
+        required_cols = ['bat', 'bat_hand', 'score', 'out', 'bowl_kind']
+        optional_cols = ['phase', 'line', 'length']
+        analysis_cols = required_cols + [col for col in optional_cols if col in data.columns]
+        analysis_data = data[analysis_cols].copy()
+        batter_analyzer = BatterVulnerabilityAnalyzer(analysis_data)
+        
+        # Initialize bowler analyzer
+        bowler_data = data[['bowl', 'bowl_kind', 'bowl_style', 'line', 'length', 'score', 'out']].copy()
+        bowler_analyzer = BowlerAnalyzer(bowler_data)
+        
+        # Initialize plan generator
+        plan_generator = BowlingPlanGenerator(data)
+        
+        return {
+            'batter_analyzer': batter_analyzer,
+            'bowler_analyzer': bowler_analyzer,
+            'plan_generator': plan_generator
+        }, None
+    except Exception as e:
+        return None, str(e)
+
+def format_metric_value(value, format_type='float'):
+    """Utility function to format metric values"""
+    if format_type == 'float':
+        return f"{value:.2f}" if value != float('inf') else "No dismissals"
+    return str(value)
+
+def display_phase_performance(phase_data, batter_name):
+    """Utility function to display phase performance"""
+    if not phase_data:
+        st.write("No phase-wise data available.")
+        return
+        
+    for phase, stats in phase_data.items():
+        phase_name = DataProcessor.PHASE_NAMES.get(phase, f"Phase {phase}")
+        with st.expander(phase_name, expanded=True):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Strike Rate", format_metric_value(stats['strike_rate']))
+            with col2:
+                st.metric("Average", format_metric_value(stats['average']))
+            with col3:
+                st.metric("Runs/Balls", f"{stats['runs']}/{stats['balls']}")
+
 # Page configuration
 st.set_page_config(
     page_title="T20 Bowling Strategy Analyzer",
@@ -63,93 +135,25 @@ with st.sidebar:
     st.header("Data Input")
     
     if not st.session_state.data_loaded:
-        # Load local data file
-        data_path = Path(__file__).parent.parent / "data" / "t20_bbb.csv"
-        if data_path.exists():
-            try:
-                with st.spinner("Loading data file..."):
-                    # Load data with low_memory=False to handle mixed types
-                    data = pd.read_csv(data_path, low_memory=False)
-                    st.success("Data file loaded successfully")
+        with st.spinner("Loading and processing data..."):
+            data, error = load_and_process_data()
+            if error:
+                st.error(f"Error: {error}")
+            else:
+                st.session_state.data = data
+                st.session_state.data_loaded = True
+                st.success("Data loaded and processed successfully")
                 
-                with st.spinner("Validating data..."):
-                    # Ensure required columns exist
-                    required_columns = ['p_match', 'bat', 'bowl', 'line', 'length', 'phase', 'score', 'out']
-                    missing_columns = [col for col in required_columns if col not in data.columns]
-                    
-                    if missing_columns:
-                        st.error(f"Missing required columns: {', '.join(missing_columns)}")
-                    else:
-                        st.success("Data validation successful")
-                        
-                        with st.spinner("Processing data..."):
-                            try:
-                                # Process the data
-                                data_processor = DataProcessor(data)
-                                processed_data = data_processor.process()
-                                st.success("Data processing completed")
-                                
-                                # Store in session state
-                                st.session_state.data = processed_data
-                                st.session_state.data_loaded = True
-                                
-                                # Display data stats
-                                st.subheader("Dataset Statistics")
-                                st.write(f"Matches: {processed_data['p_match'].nunique()}")
-                                st.write(f"Batters: {processed_data['bat'].nunique()}")
-                                st.write(f"Bowlers: {processed_data['bowl'].nunique()}")
-                                
-                                # Initialize analyzers with progress tracking
-                                st.write("Initializing analyzers...")
-                                progress_bar = st.progress(0)
-                                
-                                st.write("Creating BatterVulnerabilityAnalyzer...")
-                                try:
-                                    # Initialize with required columns
-                                    required_cols = ['bat', 'bat_hand', 'score', 'out', 'bowl_kind']
-                                    optional_cols = ['phase', 'line', 'length']
-                                    analysis_cols = required_cols + [col for col in optional_cols if col in processed_data.columns]
-                                    analysis_data = processed_data[analysis_cols].copy()
-                                    st.session_state.batter_analyzer = BatterVulnerabilityAnalyzer(analysis_data)
-                                    progress_bar.progress(25)
-                                    st.success("Batter analyzer initialized")
-                                    
-                                    st.write("Creating BowlerAnalyzer...")
-                                    # Initialize with only necessary columns for bowler analysis
-                                    bowler_data = processed_data[['bowl', 'bowl_kind', 'bowl_style', 'line', 'length', 'score', 'out']].copy()
-                                    st.session_state.bowler_analyzer = BowlerAnalyzer(bowler_data)
-                                    progress_bar.progress(50)
-                                    st.success("Bowler analyzer initialized")
-                                    
-                                    st.write("Creating BowlingPlanGenerator...")
-                                    st.session_state.plan_generator = BowlingPlanGenerator(processed_data)
-                                    progress_bar.progress(75)
-                                    st.success("Plan generator initialized")
-                                    
-                                    progress_bar.progress(100)
-                                    st.session_state.analyzers_initialized = True
-                                    st.success("All analyzers initialized successfully!")
-                                    
-                                    time.sleep(1)  # Give users time to see the success message
-                                    st.rerun()
-                                    
-                                except Exception as analyzer_error:
-                                    st.error(f"Error initializing analyzers: {str(analyzer_error)}")
-                                    st.error("Debug info:")
-                                    st.write(f"Memory usage: {processed_data.memory_usage().sum() / 1024**2:.2f} MB")
-                                    st.write(f"Number of rows: {len(processed_data)}")
-                                    st.write(f"Columns: {', '.join(processed_data.columns)}")
-                                    st.exception(analyzer_error)
-                            except Exception as proc_error:
-                                st.error(f"Error processing data: {str(proc_error)}")
-                                st.exception(proc_error)
-
-            except Exception as e:
-                st.error(f"Error loading local data: {str(e)}")
-                st.error("Please check the data format and try again.")
-                st.exception(e)
-        else:
-            st.error("Local data file not found. Please ensure t20_bbb.csv exists in the data directory.")
+                # Initialize analyzers
+                analyzers, error = initialize_analyzers(data)
+                if error:
+                    st.error(f"Error initializing analyzers: {error}")
+                else:
+                    st.session_state.batter_analyzer = analyzers['batter_analyzer']
+                    st.session_state.bowler_analyzer = analyzers['bowler_analyzer']
+                    st.session_state.plan_generator = analyzers['plan_generator']
+                    st.session_state.analyzers_initialized = True
+                    st.success("Analyzers initialized successfully")
     else:
         # Show navigation only after data is loaded
         st.markdown("---")
@@ -306,122 +310,7 @@ if st.session_state.current_page == "Batter Analysis":
                     
                     # Get phase data
                     phase_data = batter_profile.get('by_phase', {})
-                    phase_names = {1: "Powerplay (1-6)", 2: "Middle Overs (7-16)", 3: "Death Overs (17-20)", 4: "Other"}
-                    
-                    if phase_data:
-                        # Create phase selection dropdown
-                        phase_options = ["All Phases"] + [f"{phase}: {phase_names.get(phase, f'Phase {phase}')}" 
-                                                          for phase in sorted(phase_data.keys())]
-                        selected_phase_option = st.selectbox("Select Phase", phase_options, key="phase_dropdown")
-                        
-                        # Process selection
-                        if selected_phase_option == "All Phases":
-                            # Prepare data for all phases
-                            phases_df = []
-                            for phase, stats in phase_data.items():
-                                if stats['balls'] >= 5:  # Only include if sufficient data
-                                    phases_df.append({
-                                        'phase': phase_names.get(phase, f"Phase {phase}"),
-                                        'strike_rate': stats['strike_rate'],
-                                        'average': stats['average'] if stats['average'] != float('inf') else None,
-                                        'runs': stats['runs'],
-                                        'balls': stats['balls'],
-                                        'dismissals': stats['dismissals']
-                                    })
-                            
-                            if phases_df:
-                                phases_df = pd.DataFrame(phases_df)
-                                
-                                # Display strike rate comparison
-                                fig, ax = plt.subplots(figsize=(10, 6))
-                                bars = ax.bar(phases_df['phase'], phases_df['strike_rate'], color='lightgreen')
-                                
-                                # Add data labels
-                                for i, bar in enumerate(bars):
-                                    height = bar.get_height()
-                                    ax.text(bar.get_x() + bar.get_width()/2., height + 0.1,
-                                            f"{height:.1f}", ha='center', va='bottom', rotation=0)
-                                
-                                ax.set_title(f"{selected_batter}'s Strike Rate in Different Phases")
-                                ax.set_xlabel("Phase")
-                                ax.set_ylabel("Strike Rate")
-                                plt.xticks(rotation=45, ha='right')
-                                plt.tight_layout()
-                                
-                                st.pyplot(fig)
-                                
-                                # Display the data table
-                                st.subheader("Phase Statistics")
-                                st.dataframe(phases_df)
-                            else:
-                                st.write("Not enough data across phases for meaningful analysis.")
-                        else:
-                            # Extract the selected phase number
-                            selected_phase = int(selected_phase_option.split(":")[0])
-                            phase_stats = phase_data.get(selected_phase, {})
-                            
-                            if phase_stats:
-                                st.write(f"### {selected_batter}'s Performance in {phase_names.get(selected_phase, f'Phase {selected_phase}')}")
-                                
-                                col1, col2, col3 = st.columns(3)
-                                with col1:
-                                    st.metric("Strike Rate", f"{phase_stats['strike_rate']:.2f}")
-                                with col2:
-                                    avg_val = "No dismissals" if phase_stats['average'] == float('inf') else f"{phase_stats['average']:.2f}"
-                                    st.metric("Average", avg_val)
-                                with col3:
-                                    st.metric("Runs / Balls", f"{phase_stats['runs']} / {phase_stats['balls']}")
-                                
-                                # Check if we have phase-bowl style data
-                                if batter_profile.get('phase_bowl_style') and selected_phase in batter_profile['phase_bowl_style']:
-                                    phase_bowlers = batter_profile['phase_bowl_style'][selected_phase]
-                                    
-                                    st.subheader(f"Performance Against Bowling Styles in {phase_names.get(selected_phase, f'Phase {selected_phase}')}")
-                                    
-                                    if phase_bowlers:
-                                        # Prepare data for visualization
-                                        phase_bowl_data = []
-                                        for style, stats in phase_bowlers.items():
-                                            phase_bowl_data.append({
-                                                'style': style,
-                                                'strike_rate': stats['strike_rate'],
-                                                'average': stats['average'] if stats['average'] != float('inf') else None,
-                                                'balls': stats['balls']
-                                            })
-                                        
-                                        if phase_bowl_data:
-                                            # Create DataFrame and sort by strike rate
-                                            phase_bowl_df = pd.DataFrame(phase_bowl_data)
-                                            phase_bowl_df = phase_bowl_df.sort_values('strike_rate', ascending=False)
-                                            
-                                            # Display bar chart
-                                            fig, ax = plt.subplots(figsize=(12, 6))
-                                            bars = ax.bar(phase_bowl_df['style'], phase_bowl_df['strike_rate'], color='orange')
-                                            
-                                            # Add data labels
-                                            for i, bar in enumerate(bars):
-                                                height = bar.get_height()
-                                                ax.text(bar.get_x() + bar.get_width()/2., height + 0.1,
-                                                        f"{height:.1f}", ha='center', va='bottom', rotation=0)
-                                            
-                                            ax.set_title(f"{selected_batter}'s Strike Rate vs Bowling Styles in {phase_names.get(selected_phase)}")
-                                            ax.set_xlabel("Bowling Style")
-                                            ax.set_ylabel("Strike Rate")
-                                            plt.xticks(rotation=45, ha='right')
-                                            plt.tight_layout()
-                                            
-                                            st.pyplot(fig)
-                                            
-                                            # Data table
-                                            st.dataframe(phase_bowl_df)
-                                    else:
-                                        st.write("No detailed bowling style data available for this phase.")
-                                else:
-                                    st.write("No detailed bowling style data available for this phase.")
-                            else:
-                                st.write(f"No data available for {selected_batter} in {phase_names.get(selected_phase, f'Phase {selected_phase}')}.")
-                    else:
-                        st.write("No phase-wise data available for this batter.")
+                    display_phase_performance(phase_data, selected_batter)
                 
                 with tab4:
                     st.subheader("Performance by Bowling Style")
