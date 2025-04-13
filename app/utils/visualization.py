@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import io
 
-def create_common_heatmap(data, row_labels, col_labels, title, cmap='YlOrRd', value_label='Value'):
+def create_common_heatmap(data, row_labels, col_labels, title, cmap='YlOrRd', value_label='Value', ball_counts=None):
     """
     Common function to create heatmaps with consistent styling
     
@@ -23,6 +23,8 @@ def create_common_heatmap(data, row_labels, col_labels, title, cmap='YlOrRd', va
         Matplotlib colormap name
     value_label : str
         Label for the colorbar
+    ball_counts : numpy.ndarray, optional
+        2D array of ball counts to display in brackets
         
     Returns:
     --------
@@ -42,7 +44,16 @@ def create_common_heatmap(data, row_labels, col_labels, title, cmap='YlOrRd', va
     for i in range(len(row_labels)):
         for j in range(len(col_labels)):
             value = data[i, j]
-            text = ax.text(j, i, f'{value:.2f}',
+            # Add ball count if provided
+            if ball_counts is not None:
+                count = ball_counts[i, j]
+                text = ax.text(j, i, f'{value:.2f}\n({int(count)})',
+                         ha="center", va="center",
+                         color="black" if value < np.max(data) * 0.7 else "white",
+                         fontweight='bold',
+                         fontsize=8)
+            else:
+                text = ax.text(j, i, f'{value:.2f}',
                          ha="center", va="center",
                          color="black" if value < np.max(data) * 0.7 else "white",
                          fontweight='bold')
@@ -76,8 +87,9 @@ def create_vulnerability_heatmap(batter_data):
     lines = [DataProcessor.LINE_DISPLAY[i] for i in range(5)]
     lengths = [DataProcessor.LENGTH_DISPLAY[i] for i in range(6)]
     
-    # Initialize data matrix
+    # Initialize data matrices
     data = np.zeros((6, 5))  # 6 lengths x 5 lines
+    ball_counts = np.zeros((6, 5))
     
     # Extract line-length data
     line_length_stats = batter_data.get('vs_line_length', {})
@@ -98,6 +110,7 @@ def create_vulnerability_heatmap(batter_data):
                     vulnerability = 100 / stats['strike_rate'] if stats['strike_rate'] > 0 else 0
                 
                 data[row_idx, col_idx] = vulnerability
+                ball_counts[row_idx, col_idx] = stats['balls']
             except (ValueError, IndexError):
                 continue
     
@@ -112,7 +125,8 @@ def create_vulnerability_heatmap(batter_data):
         lines,
         "Vulnerability Heatmap",
         cmap='YlOrRd',
-        value_label='Normalized Vulnerability Score'
+        value_label='Normalized Vulnerability Score',
+        ball_counts=ball_counts
     )
 
 def create_bowler_economy_heatmap(line_length_stats):
@@ -123,8 +137,9 @@ def create_bowler_economy_heatmap(line_length_stats):
     lines = [DataProcessor.LINE_DISPLAY[i] for i in range(5)]
     lengths = [DataProcessor.LENGTH_DISPLAY[i] for i in range(6)]
     
-    # Initialize data matrix
+    # Initialize data matrices
     data = np.zeros((len(lengths), len(lines)))
+    ball_counts = np.zeros((len(lengths), len(lines)))
     
     # Fill in the data
     for (line, length), stats in line_length_stats.items():
@@ -132,7 +147,11 @@ def create_bowler_economy_heatmap(line_length_stats):
             # Find indices based on display values
             col_idx = lines.index(line)
             row_idx = lengths.index(length)
-            data[row_idx, col_idx] = stats['economy']
+            
+            # Use economy rate for heat value
+            if stats['balls'] >= 3:  # Minimum sample size
+                data[row_idx, col_idx] = stats['economy']
+                ball_counts[row_idx, col_idx] = stats['balls']
         except (ValueError, IndexError):
             continue
     
@@ -142,38 +161,51 @@ def create_bowler_economy_heatmap(line_length_stats):
         lines,
         "Economy Rate by Line & Length",
         cmap='YlOrRd',
-        value_label='Economy Rate'
+        value_label='Economy Rate (runs/over)',
+        ball_counts=ball_counts
     )
 
 def create_bowler_strike_rate_heatmap(line_length_stats):
-    """Create strike rate heatmap for bowler analysis"""
+    """Create bowling strike rate heatmap for bowler analysis (balls/wicket)"""
     from src.data_processor import DataProcessor
     
     # Define display labels in the same order as numeric indices
     lines = [DataProcessor.LINE_DISPLAY[i] for i in range(5)]
     lengths = [DataProcessor.LENGTH_DISPLAY[i] for i in range(6)]
     
-    # Initialize data matrix
+    # Initialize data matrices
     data = np.zeros((len(lengths), len(lines)))
+    ball_counts = np.zeros((len(lengths), len(lines)))
+    max_sr = 0  # Track maximum bowling strike rate for normalization
     
     # Fill in the data
     for (line, length), stats in line_length_stats.items():
         try:
-            if stats['wickets'] > 0:
-                # Find indices based on display values
-                col_idx = lines.index(line)
-                row_idx = lengths.index(length)
-                data[row_idx, col_idx] = stats['strike_rate']
+            # Find indices based on display values
+            col_idx = lines.index(line)
+            row_idx = lengths.index(length)
+            
+            # Only include if we have wickets and enough balls
+            if stats['wickets'] > 0 and stats['balls'] >= 3:
+                sr = stats['bowling_strike_rate']  # Using bowling strike rate (balls/wicket)
+                data[row_idx, col_idx] = sr
+                ball_counts[row_idx, col_idx] = stats['balls']
+                max_sr = max(max_sr, sr)
         except (ValueError, IndexError):
             continue
+    
+    # Normalize bowling strike rates for better visualization (lower is better)
+    if max_sr > 0:
+        data = np.where(data > 0, max_sr - data, 0)
     
     return create_common_heatmap(
         data,
         lengths,
         lines,
-        "Strike Rate by Line & Length",
+        "Bowling Strike Rate by Line & Length",
         cmap='YlOrRd',
-        value_label='Strike Rate'
+        value_label='Bowling Strike Rate (balls/wicket)',
+        ball_counts=ball_counts
     )
 
 def create_field_placement_visualization(field_setting):

@@ -36,42 +36,41 @@ class BowlerAnalyzer:
             # Economy and average
             economy = (total_runs / total_balls * 6) if total_balls > 0 else 0
             average = (total_runs / wickets) if wickets > 0 else float('inf')
-            strike_rate = (total_balls / wickets) if wickets > 0 else float('inf')
+            
+            # Bowling strike rate (balls per wicket - lower is better)
+            bowling_strike_rate = (total_balls / wickets) if wickets > 0 else float('inf')
             
             # Analysis by line and length
             line_length_stats = {}
             
             # Group by line and length
             if 'line' in bowler_data.columns and 'length' in bowler_data.columns:
-                ll_stats = (bowler_data
-                    .groupby(['line', 'length'], as_index=False)
-                    .agg({
-                        'score': 'sum',
-                        'out': 'sum'
-                    }).assign(balls=lambda x: 1)
-                )
-                
-                for _, row in ll_stats.iterrows():
-                    line = row['line']  # Already numeric 0-4
-                    length = row['length']  # Already numeric 0-5
-                    key = (line, length)
+                for (line, length), ll_data in bowler_data.groupby(['line', 'length']):
+                    if pd.isna(line) or pd.isna(length):
+                        continue
+                        
+                    runs = ll_data['score'].sum()
+                    balls = len(ll_data)
+                    wickets = ll_data['out'].sum()
                     
-                    runs = row['score']
-                    balls = row['balls']
-                    outs = row['out']
-                    
-                    eco = (runs / balls * 6) if balls > 0 else 0
-                    avg = (runs / outs) if outs > 0 else float('inf')
-                    sr = (balls / outs) if outs > 0 else float('inf')
-                    
-                    line_length_stats[key] = {
-                        'runs': int(runs),
-                        'balls': int(balls),
-                        'wickets': int(outs),
-                        'economy': eco,
-                        'average': avg,
-                        'strike_rate': sr
-                    }
+                    # Calculate stats if we have enough balls
+                    if balls >= 3:
+                        eco = (runs / balls * 6) if balls > 0 else 0
+                        avg = (runs / wickets) if wickets > 0 else float('inf')  
+                        bowl_sr = (balls / wickets) if wickets > 0 else float('inf')
+                        
+                        # Convert line and length to display values
+                        line_display = DataProcessor.LINE_DISPLAY.get(int(line), 'Unknown')
+                        length_display = DataProcessor.LENGTH_DISPLAY.get(int(length), 'Unknown')
+                        
+                        line_length_stats[(line_display, length_display)] = {
+                            'runs': int(runs),
+                            'balls': int(balls),
+                            'wickets': int(wickets),
+                            'economy': eco,
+                            'average': avg,
+                            'bowling_strike_rate': bowl_sr
+                        }
             
             # Store profile
             profiles[bowler] = {
@@ -82,7 +81,7 @@ class BowlerAnalyzer:
                 'wickets': wickets,
                 'economy': economy,
                 'average': average,
-                'strike_rate': strike_rate,
+                'bowling_strike_rate': bowling_strike_rate,
                 'by_line_length': line_length_stats
             }
         
@@ -109,20 +108,20 @@ class BowlerAnalyzer:
                 
             # Calculate effectiveness score (lower is better)
             if stats['wickets'] > 0:
-                effectiveness = (0.7 * stats['economy']) - (0.3 * (120 / stats['strike_rate']))
+                effectiveness = (0.7 * stats['economy']) - (0.3 * (120 / stats['bowling_strike_rate']))
             else:
                 effectiveness = stats['economy']
             
             # Use display mappings for line and length
-            line_display = DataProcessor.LINE_DISPLAY.get(int(line), 'Unknown')
-            length_display = DataProcessor.LENGTH_DISPLAY.get(int(length), 'Unknown')
+            line_display = line
+            length_display = length
             
             recommendations.append({
                 'line': line_display,
                 'length': length_display,
                 'effectiveness': effectiveness,
                 'economy': stats['economy'],
-                'strike_rate': stats['strike_rate'] if stats['wickets'] > 0 else float('inf'),
+                'strike_rate': stats['bowling_strike_rate'] if stats['wickets'] > 0 else float('inf'),
                 'sample_size': stats['balls']
             })
         

@@ -46,21 +46,21 @@ class BowlingPlanGenerator:
             average = (total_runs / dismissals) if dismissals > 0 else float('inf')
             
             # Analysis by bowling type
-            bowl_kinds = batter_data.groupby('bowl_kind').agg({
+            bowl_styles = batter_data.groupby('bowl_style').agg({
                 'score': 'sum',
                 'out': 'sum'
             })
             
-            bowl_kind_stats = {}
-            for kind, stats in bowl_kinds.iterrows():
+            bowl_style_stats = {}
+            for style, stats in bowl_styles.iterrows():
                 runs = stats['score']
-                balls = len(batter_data[batter_data['bowl_kind'] == kind])
+                balls = len(batter_data[batter_data['bowl_style'] == style])
                 outs = stats['out']
                 
                 sr = (runs / balls * 100) if balls > 0 else 0
                 avg = (runs / outs) if outs > 0 else float('inf')
                 
-                bowl_kind_stats[kind] = {
+                bowl_style_stats[style] = {
                     'runs': runs,
                     'balls': balls,
                     'dismissals': outs,
@@ -129,7 +129,7 @@ class BowlingPlanGenerator:
                 'dismissals': dismissals,
                 'strike_rate': strike_rate,
                 'average': average,
-                'vs_bowler_types': bowl_kind_stats,
+                'vs_bowler_types': bowl_style_stats,
                 'vs_line_length': line_length_stats,
                 'by_phase': phase_stats
             }
@@ -144,13 +144,13 @@ class BowlingPlanGenerator:
         profiles = {}
         
         # Group by bowler type
-        bowler_types = self.data['bowl_kind'].unique()
+        bowler_types = self.data['bowl_style'].unique()
         
-        for bowl_kind in bowler_types:
-            if pd.isna(bowl_kind) or bowl_kind == 'Unknown':
+        for bowl_style in bowler_types:
+            if pd.isna(bowl_style) or bowl_style == 'Unknown':
                 continue
                 
-            bowler_data = self.data[self.data['bowl_kind'] == bowl_kind]
+            bowler_data = self.data[self.data['bowl_style'] == bowl_style]
             
             # Calculate overall stats
             total_runs = bowler_data['score'].sum()
@@ -160,16 +160,18 @@ class BowlingPlanGenerator:
             # Economy and average
             economy = (total_runs / total_balls * 6) if total_balls > 0 else 0
             average = (total_runs / wickets) if wickets > 0 else float('inf')
-            strike_rate = (total_balls / wickets) if wickets > 0 else float('inf')
+            
+            # Bowling strike rate (balls per wicket - lower is better)
+            bowling_strike_rate = (total_balls / wickets) if wickets > 0 else float('inf')
             
             # Store profile
-            profiles[bowl_kind] = {
+            profiles[bowl_style] = {
                 'total_runs': total_runs,
                 'total_balls': total_balls,
                 'wickets': wickets,
                 'economy': economy,
                 'average': average,
-                'strike_rate': strike_rate
+                'bowling_strike_rate': bowling_strike_rate  # Renamed to be explicit
             }
         
         return profiles
@@ -224,21 +226,21 @@ class BowlingPlanGenerator:
             # Find bowler type with lowest average
             best_bowler_types = []
             
-            for kind, stats in profile['vs_bowler_types'].items():
+            for style, stats in profile['vs_bowler_types'].items():
                 if stats['dismissals'] > 0 and stats['balls'] >= 5:
-                    best_bowler_types.append((kind, stats['average']))
+                    best_bowler_types.append((style, stats['average']))
             
             # Sort by average (lower is better)
             best_bowler_types.sort(key=lambda x: x[1])
             
             if best_bowler_types and best_bowler_types[0][1] < profile['average'] * 0.8:
-                kind, avg = best_bowler_types[0]
+                style, avg = best_bowler_types[0]
                 weaknesses.append({
                     'type': 'bowler_type',
-                    'bowler_type': kind,
+                    'bowler_type': style,
                     'average': avg,
                     'overall_average': profile['average'],
-                    'confidence': 'high' if profile['vs_bowler_types'][kind]['balls'] > 30 else 'medium'
+                    'confidence': 'high' if profile['vs_bowler_types'][style]['balls'] > 30 else 'medium'
                 })
         
         # Check weakness against line and length
@@ -330,7 +332,7 @@ class BowlingPlanGenerator:
         matchups = []
         
         for bowler in available_bowlers:
-            bowl_type = bowler.get('type', bowler.get('bowl_kind', 'Unknown'))
+            bowl_type = bowler.get('type', bowler.get('bowl_style', 'Unknown'))
             
             if bowl_type == 'Unknown' or bowl_type not in self.bowler_profiles:
                 continue
@@ -616,7 +618,7 @@ class BowlingPlanGenerator:
         
         # Generate phase-specific plans
         if available_bowlers:
-            bowler_types = [b.get('type', b.get('bowl_kind', 'Unknown')) for b in available_bowlers]
+            bowler_types = [b.get('type', b.get('bowl_style', 'Unknown')) for b in available_bowlers]
             bowler_types = [t for t in bowler_types if t != 'Unknown']
         else:
             bowler_types = list(self.bowler_profiles.keys())
