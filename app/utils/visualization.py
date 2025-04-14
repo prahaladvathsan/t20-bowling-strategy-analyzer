@@ -4,7 +4,15 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from matplotlib.lines import Line2D
-from src.data_processor import DataProcessor
+import sys
+from pathlib import Path
+
+# Add src directory to Python path
+src_path = str(Path(__file__).parent.parent.parent / "src")
+if src_path not in sys.path:
+    sys.path.append(src_path)
+
+from data_processor import DataProcessor
 
 def create_common_heatmap(data, row_labels, col_labels, title, cmap='YlOrRd', value_label='Value', ball_counts=None):
     """Common function to create heatmaps with consistent styling"""
@@ -47,6 +55,7 @@ def create_common_heatmap(data, row_labels, col_labels, title, cmap='YlOrRd', va
 
 def process_line_length_data(stats_dict, data_type='vulnerability'):
     """Process line/length data for heatmap creation"""
+    # Create arrays of display names in order
     lines = [DataProcessor.LINE_DISPLAY[i] for i in range(5)]
     lengths = [DataProcessor.LENGTH_DISPLAY[i] for i in range(6)]
     
@@ -54,22 +63,29 @@ def process_line_length_data(stats_dict, data_type='vulnerability'):
     ball_counts = np.zeros((6, 5))
     
     if stats_dict:
-        for (line, length), stats in stats_dict.items():
+        for combo_key, stats in stats_dict.items():
             try:
-                col_idx = lines.index(line)
-                row_idx = lengths.index(length)
+                # Parse the tuple of display names
+                # Remove outer parentheses and split
+                combo_str = combo_key.strip("()")
+                line_display, length_display = [s.strip().strip("'") for s in combo_str.split(',')]
                 
-                if stats['balls'] >= 3:
+                # Find indices in our ordered arrays
+                col_idx = lines.index(line_display)
+                row_idx = lengths.index(length_display)
+                
+                if stats['balls'] >= 1:
                     if data_type == 'vulnerability':
                         value = (100 / stats['average']) if stats['dismissals'] > 0 else (100 / stats['strike_rate'])
                     elif data_type == 'economy':
                         value = stats['economy']
                     elif data_type == 'strike_rate':
-                        value = stats['bowling_strike_rate'] if stats.get('wickets', 0) > 0 else 0
+                        value = stats['wickets'] if stats.get('wickets', 0) > 0 else 0
                     
                     data[row_idx, col_idx] = value
                     ball_counts[row_idx, col_idx] = stats['balls']
-            except (ValueError, IndexError):
+            except (ValueError, IndexError) as e:
+                print(f"Error processing {combo_key}: {e}")
                 continue
     
     return data, ball_counts, lines, lengths

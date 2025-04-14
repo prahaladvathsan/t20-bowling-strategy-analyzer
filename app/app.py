@@ -6,16 +6,17 @@ import seaborn as sns
 import sys
 import os
 from pathlib import Path
-import time
 
-# Add project root to path
-sys.path.append(str(Path(__file__).parent.parent))
+# Add src directory to Python path
+src_path = str(Path(__file__).parent.parent / "src")
+if src_path not in sys.path:
+    sys.path.append(src_path)
 
 # Import modules
-from src.data_processor import DataProcessor
-from src.batter_analyzer import BatterVulnerabilityAnalyzer
-from src.bowler_analyzer import BowlerAnalyzer 
-from src.bowling_plan_generator import BowlingPlanGenerator
+from data_processor import DataProcessor
+from batter_analyzer import BatterVulnerabilityAnalyzer
+from bowler_analyzer import BowlerAnalyzer
+from bowling_plan_generator import BowlingPlanGenerator
 from utils.visualization import (
     create_vulnerability_heatmap,
     create_field_placement_visualization,
@@ -25,45 +26,28 @@ from utils.visualization import (
 )
 
 def load_and_process_data():
-    """Centralized function to load and process data"""
+    """Load pre-processed data from saved files"""
     try:
-        data_path = Path(__file__).parent.parent / "data" / "t20_bbb.csv"
+        # Load processed data from parquet file
+        db_path = Path(__file__).parent.parent / "db"
+        data_path = db_path / "processed_data.parquet"
+        
         if not data_path.exists():
-            raise FileNotFoundError("Data file not found. Please ensure t20_bbb.csv exists in the data directory.")
+            return None, "Processed data not found. Please run the backend processor first."
             
-        # Load data with low_memory=False to handle mixed types
-        data = pd.read_csv(data_path, low_memory=False)
+        data = pd.read_parquet(data_path)
+        return data, None
         
-        # Validate required columns
-        required_columns = ['p_match', 'bat', 'bowl', 'line', 'length', 'phase', 'score', 'out']
-        missing_columns = [col for col in required_columns if col not in data.columns]
-        if missing_columns:
-            raise ValueError(f"Missing required columns: {', '.join(missing_columns)}")
-        
-        # Process data
-        data_processor = DataProcessor(data)
-        processed_data = data_processor.process()
-        
-        return processed_data, None
     except Exception as e:
         return None, str(e)
 
-def initialize_analyzers(data):
-    """Centralized function to initialize all analyzers"""
+def initialize_analyzers(data=None):
+    """Initialize analyzers with saved data"""
     try:
-        # Initialize with required columns for batter analysis
-        required_cols = ['bat', 'bat_hand', 'score', 'out', 'bowl_kind']
-        optional_cols = ['phase', 'line', 'length']
-        analysis_cols = required_cols + [col for col in optional_cols if col in data.columns]
-        analysis_data = data[analysis_cols].copy()
-        batter_analyzer = BatterVulnerabilityAnalyzer(analysis_data)
-        
-        # Initialize bowler analyzer
-        bowler_data = data[['bowl', 'bowl_kind', 'bowl_style', 'line', 'length', 'score', 'out']].copy()
-        bowler_analyzer = BowlerAnalyzer(bowler_data)
-        
-        # Initialize plan generator
-        plan_generator = BowlingPlanGenerator(data)
+        # Initialize analyzers without data to load from saved files
+        batter_analyzer = BatterVulnerabilityAnalyzer()
+        bowler_analyzer = BowlerAnalyzer()
+        plan_generator = BowlingPlanGenerator()
         
         return {
             'batter_analyzer': batter_analyzer,

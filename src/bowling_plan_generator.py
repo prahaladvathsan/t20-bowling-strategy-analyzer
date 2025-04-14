@@ -2,7 +2,9 @@
 
 import pandas as pd
 import numpy as np
-from src.data_processor import DataProcessor
+import json
+from pathlib import Path
+from data_processor import DataProcessor
 
 class BowlingPlanGenerator:
     """
@@ -10,13 +12,30 @@ class BowlingPlanGenerator:
     based on ball-by-ball data analysis
     """
     
-    def __init__(self, data):
-        """Initialize with ball-by-ball dataset"""
-        self.data = data
-        self.batter_profiles = self._create_batter_profiles()
-        self.bowler_profiles = self._create_bowler_profiles()
-        self.phase_insights = self._analyze_game_phases()
-        
+    def __init__(self, data=None):
+        """Initialize with ball-by-ball dataset or load from saved data"""
+        if data is not None:
+            self.data = data
+            self.batter_profiles = self._create_batter_profiles()
+            self.bowler_profiles = self._create_bowler_profiles()
+            self.phase_insights = self._analyze_game_phases()
+        else:
+            # Load from saved data
+            self._load_saved_data()
+            self.data = None  # No need to keep data in memory if loading from file
+    
+    def _load_saved_data(self):
+        """Load saved plan generator data"""
+        try:
+            db_path = Path(__file__).parent.parent / "db"
+            with open(db_path / "plan_generator_data.json", "r") as f:
+                data = json.load(f)
+                self.batter_profiles = data['batter_profiles']
+                self.bowler_profiles = data['bowler_profiles']
+                self.phase_insights = data['phase_insights']
+        except FileNotFoundError:
+            raise ValueError("No saved plan generator data found. Please run the backend processor first.")
+    
     def _create_batter_profiles(self):
         """Create profiles for batters based on their performance"""
         profiles = {}
@@ -78,23 +97,28 @@ class BowlingPlanGenerator:
         """Process line and length data for analysis"""
         stats = {}
         
-        if 'line' in data.columns and 'length' in data.columns:
-            for (line, length), ll_data in data.groupby(['line', 'length']):
-                if pd.isna(line) or pd.isna(length):
-                    continue
-                    
-                runs = ll_data['score'].sum()
-                balls = len(ll_data)
-                dismissals = ll_data['out'].sum()
+        if data is None:
+            return stats
+            
+        if not all(col in data.columns for col in ['line', 'length']):
+            return stats
+            
+        for (line, length), ll_data in data.groupby(['line', 'length']):
+            if pd.isna(line) or pd.isna(length):
+                continue
                 
-                if balls >= 3:
-                    stats[(line, length)] = {
-                        'runs': runs,
-                        'balls': balls,
-                        'dismissals': dismissals,
-                        'strike_rate': DataProcessor.calculate_strike_rate(runs, balls),
-                        'average': DataProcessor.calculate_average(runs, dismissals)
-                    }
+            runs = ll_data['score'].sum()
+            balls = len(ll_data)
+            dismissals = ll_data['out'].sum()
+            
+            if balls >= 3:
+                stats[(int(line), int(length))] = {  # Ensure numeric keys
+                    'runs': runs,
+                    'balls': balls,
+                    'dismissals': dismissals,
+                    'strike_rate': DataProcessor.calculate_strike_rate(runs, balls),
+                    'average': DataProcessor.calculate_average(runs, dismissals)
+                }
         
         return stats
     
@@ -168,15 +192,6 @@ class BowlingPlanGenerator:
     def find_batter_weaknesses(self, batter):
         """
         Identify weaknesses for a specific batter
-        
-        Parameters:
-        -----------
-        batter : str
-            Batter name
-            
-        Returns:
-        --------
-        Dictionary with identified weaknesses
         """
         if batter not in self.batter_profiles:
             return {"error": "Batter not found in dataset"}
@@ -211,26 +226,36 @@ class BowlingPlanGenerator:
             # Find line-length with lowest average
             best_line_lengths = []
             
-            for combo, stats in profile['vs_line_length'].items():
+            for combo_key, stats in profile['vs_line_length'].items():
                 if stats['dismissals'] > 0 and stats['balls'] >= 5:
-                    best_line_lengths.append((combo, stats['average']))
+                    # Parse numeric tuple string (e.g. "('2', '2')")
+                    combo_str = combo_key.strip("()' ")
+                    line_num, length_num = [int(x.strip()) for x in combo_str.split(',')]
+                    
+                    # Convert to display names
+                    line_display = DataProcessor.LINE_DISPLAY.get(line_num, 'Unknown')
+                    length_display = DataProcessor.LENGTH_DISPLAY.get(length_num, 'Unknown')
+                    
+                    best_line_lengths.append({
+                        'line': line_display,
+                        'length': length_display,
+                        'key': combo_key,  # Keep original key for lookup
+                        'average': stats['average']
+                    })
             
             # Sort by average (lower is better)
-            best_line_lengths.sort(key=lambda x: x[1])
+            best_line_lengths.sort(key=lambda x: x['average'])
             
-            if best_line_lengths and best_line_lengths[0][1] < profile['average'] * 0.7:
-                combo, avg = best_line_lengths[0]
-                line_num, length_num = combo
-                line_display = DataProcessor.LINE_DISPLAY.get(line_num, 'Unknown')
-                length_display = DataProcessor.LENGTH_DISPLAY.get(length_num, 'Unknown')
-
+            if best_line_lengths and best_line_lengths[0]['average'] < profile['average'] * 0.7:
+                best_combo = best_line_lengths[0]
+                
                 weaknesses.append({
                     'type': 'line_length',
-                    'line': line_display,
-                    'length': length_display,
-                    'average': avg,
+                    'line': best_combo['line'],
+                    'length': best_combo['length'],
+                    'average': best_combo['average'],
                     'overall_average': profile['average'],
-                    'confidence': 'high' if profile['vs_line_length'][combo]['balls'] > 20 else 'medium'
+                    'confidence': 'high' if profile['vs_line_length'][best_combo['key']]['balls'] > 20 else 'medium'
                 })
         
         # Check weakness by phase

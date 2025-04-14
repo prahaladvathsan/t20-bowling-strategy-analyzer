@@ -1,23 +1,40 @@
 import pandas as pd
 import numpy as np
-from src.data_processor import DataProcessor
+import json
+from pathlib import Path
+# In batter_analyzer.py
+from data_processor import DataProcessor
 
 class BatterVulnerabilityAnalyzer:
     """Analyzes batter's weaknesses against specific bowling types"""
     
-    def __init__(self, data):
-        """Initialize with ball-by-ball dataset"""
-        self.data = data.copy()
-        
-        # Check for critical columns
-        required_cols = ['bat', 'score', 'out']
-        missing_cols = [col for col in required_cols if col not in self.data.columns]
-        if missing_cols:
-            raise ValueError(f"Missing required columns: {missing_cols}")
-        
-        # Pre-calculate profiles
-        self.batter_profiles = self._create_batter_profiles()
-        
+    def __init__(self, data=None):
+        """Initialize with ball-by-ball dataset or load from saved profiles"""
+        if data is not None:
+            self.data = data.copy()
+            
+            # Check for critical columns
+            required_cols = ['bat', 'score', 'out']
+            missing_cols = [col for col in required_cols if col not in self.data.columns]
+            if missing_cols:
+                raise ValueError(f"Missing required columns: {missing_cols}")
+            
+            # Pre-calculate profiles
+            self.batter_profiles = self._create_batter_profiles()
+        else:
+            # Load from saved profiles
+            self.batter_profiles = self._load_profiles()
+            self.data = None  # No need to keep data in memory if loading from file
+    
+    def _load_profiles(self):
+        """Load batter profiles from saved JSON file"""
+        try:
+            db_path = Path(__file__).parent.parent / "db"
+            with open(db_path / "batter_profiles.json", "r") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            raise ValueError("No saved profiles found. Please run the backend processor first.")
+
     def _create_batter_profiles(self):
         """Create profiles for batters based on their performance"""
         profiles = {}
@@ -199,10 +216,16 @@ class BatterVulnerabilityAnalyzer:
     
     def get_available_bowl_styles(self):
         """Return a list of all bowling styles in the data"""
-        if 'bowl_style' not in self.data.columns:
-            return []
+        # If we have live data, use that
+        if self.data is not None and 'bowl_style' in self.data.columns:
+            styles = self.data['bowl_style'].dropna().unique()
+            valid_styles = [s for s in styles if s != '-' and s != '']
+            return sorted(valid_styles)
             
-        # Get unique styles directly from the dataset
-        styles = self.data['bowl_style'].dropna().unique()
-        valid_styles = [s for s in styles if s != '-' and s != '']
-        return sorted(valid_styles)
+        # Otherwise, extract styles from saved profiles
+        all_styles = set()
+        for profile in self.batter_profiles.values():
+            if profile.get('vs_bowler_styles'):
+                all_styles.update(profile['vs_bowler_styles'].keys())
+        
+        return sorted([s for s in all_styles if s != '-' and s != ''])

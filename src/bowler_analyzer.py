@@ -1,15 +1,31 @@
 import pandas as pd
 import numpy as np
-from src.data_processor import DataProcessor
+import json
+from pathlib import Path
+from data_processor import DataProcessor
 
 class BowlerAnalyzer:
     """Analyzes bowler effectiveness with different lines and lengths"""
     
-    def __init__(self, data):
-        """Initialize with ball-by-ball dataset"""
-        self.data = data
-        self.bowler_profiles = self._create_bowler_profiles()
+    def __init__(self, data=None):
+        """Initialize with ball-by-ball dataset or load from saved profiles"""
+        if data is not None:
+            self.data = data
+            self.bowler_profiles = self._create_bowler_profiles()
+        else:
+            # Load from saved profiles
+            self.bowler_profiles = self._load_profiles()
+            self.data = None  # No need to keep data in memory if loading from file
     
+    def _load_profiles(self):
+        """Load bowler profiles from saved JSON file"""
+        try:
+            db_path = Path(__file__).parent.parent / "db"
+            with open(db_path / "bowler_profiles.json", "r") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            raise ValueError("No saved profiles found. Please run the backend processor first.")
+
     def _create_bowler_profiles(self):
         """Create profiles for bowlers based on their performance"""
         profiles = {}
@@ -40,10 +56,10 @@ class BowlerAnalyzer:
                         continue
                         
                     runs = ll_data['score'].sum()
-                    balls = len(ll_data)
+                    balls = ll_data['score'].count()
                     wickets = ll_data['out'].sum()
                     
-                    if balls >= 3:
+                    if balls >= 1:
                         line_display = DataProcessor.LINE_DISPLAY.get(int(line), 'Unknown')
                         length_display = DataProcessor.LENGTH_DISPLAY.get(int(length), 'Unknown')
                         
@@ -53,7 +69,7 @@ class BowlerAnalyzer:
                             'wickets': int(wickets),
                             'economy': DataProcessor.calculate_economy(runs, balls),
                             'average': DataProcessor.calculate_average(runs, wickets),
-                            'bowling_strike_rate': DataProcessor.calculate_bowling_strike_rate(balls, wickets)
+                            'bowling_strike_rate': (balls/wickets) if wickets > 0 else float('inf')
                         }
             
             profiles[bowler] = {
@@ -84,20 +100,20 @@ class BowlerAnalyzer:
         
         # Calculate effectiveness scores
         recommendations = []
-        for (line, length), stats in profile['by_line_length'].items():
+        for combo_key, stats in profile['by_line_length'].items():
             # Skip combinations with too few deliveries
             if stats['balls'] < 5:
                 continue
+                
+            # Parse the display names
+            combo_str = combo_key.strip("()")
+            line_display, length_display = [s.strip().strip("'") for s in combo_str.split(',')]
                 
             # Calculate effectiveness score (lower is better)
             if stats['wickets'] > 0:
                 effectiveness = (0.7 * stats['economy']) - (0.3 * (120 / stats['bowling_strike_rate']))
             else:
                 effectiveness = stats['economy']
-            
-            # Use display mappings for line and length
-            line_display = line
-            length_display = length
             
             recommendations.append({
                 'line': line_display,
