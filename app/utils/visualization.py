@@ -18,8 +18,12 @@ def create_common_heatmap(data, row_labels, col_labels, title, cmap='YlOrRd', va
     """Common function to create heatmaps with consistent styling"""
     fig, ax = plt.subplots(figsize=(12, 8))
     
+    # Create a copy of data for visualization, replacing inf with nan to avoid display issues
+    display_data = np.copy(data)
+    display_data[np.isinf(display_data)] = np.nan
+    
     # Create heatmap using imshow
-    im = ax.imshow(data, cmap=cmap)
+    im = ax.imshow(display_data, cmap=cmap)
     
     # Add colorbar
     cbar = ax.figure.colorbar(im, ax=ax)
@@ -29,13 +33,19 @@ def create_common_heatmap(data, row_labels, col_labels, title, cmap='YlOrRd', va
     for i in range(len(row_labels)):
         for j in range(len(col_labels)):
             value = data[i, j]
-            text = f'{value:.2f}'
+            if np.isinf(value):
+                text = '∞'  # Using infinity symbol
+            else:
+                text = f'{value:.2f}'
+                
             if ball_counts is not None:
                 text += f'\n({int(ball_counts[i, j])})'
             
+            # For infinite values, always use black text
+            text_color = "black" if (np.isinf(value) or value < np.nanmax(display_data) * 0.7) else "white"
             ax.text(j, i, text,
                 ha="center", va="center",
-                color="black" if value < np.max(data) * 0.7 else "white",
+                color=text_color,
                 fontweight='bold',
                 fontsize=8)
 
@@ -76,11 +86,11 @@ def process_line_length_data(stats_dict, data_type='vulnerability'):
                 
                 if stats['balls'] >= 1:
                     if data_type == 'vulnerability':
-                        value = (100 / stats['average']) if stats['dismissals'] > 0 else (100 / stats['strike_rate'])
+                        value = stats['vulnerability']
                     elif data_type == 'economy':
                         value = stats['economy']
                     elif data_type == 'strike_rate':
-                        value = stats['wickets'] if stats.get('wickets', 0) > 0 else 0
+                        value = stats['bowling_strike_rate'] if stats.get('wickets', 0) > 0 else np.inf
                     
                     data[row_idx, col_idx] = value
                     ball_counts[row_idx, col_idx] = stats['balls']
@@ -97,9 +107,15 @@ def create_vulnerability_heatmap(batter_data):
         'vulnerability'
     )
     
+    # Replace inf values with nan for normalization
+    data_for_norm = np.copy(data)
+    data_for_norm[np.isinf(data_for_norm)] = np.nan
+    
     # Normalize vulnerability scores
-    max_value = np.max(data) if np.max(data) > 0 else 1
-    normalized_data = data / max_value if max_value > 0 else data
+    max_value = np.nanmax(data_for_norm) if np.nanmax(data_for_norm) > 0 else 1
+    normalized_data = data.copy()  # Keep inf values in the actual data
+    mask = ~np.isinf(normalized_data)  # Only normalize non-inf values
+    normalized_data[mask] = normalized_data[mask] / max_value if max_value > 0 else normalized_data[mask]
     
     return create_common_heatmap(
         normalized_data, lengths, lines,
@@ -130,11 +146,6 @@ def create_bowler_strike_rate_heatmap(line_length_stats):
         line_length_stats, 
         'strike_rate'
     )
-    
-    # Normalize strike rates (lower is better)
-    max_sr = np.max(data) if np.max(data) > 0 else 1
-    if max_sr > 0:
-        data = np.where(data > 0, max_sr - data, 0)
     
     return create_common_heatmap(
         data, lengths, lines,

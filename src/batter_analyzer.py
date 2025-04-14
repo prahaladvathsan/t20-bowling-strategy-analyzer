@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import json
+import math
 from pathlib import Path
 # In batter_analyzer.py
 from data_processor import DataProcessor
@@ -35,6 +36,66 @@ class BatterVulnerabilityAnalyzer:
         except FileNotFoundError:
             raise ValueError("No saved profiles found. Please run the backend processor first.")
 
+    def calculate_vulnerability(self, stats):
+        """
+        Calculate a nuanced vulnerability score based on multiple factors:
+        - Strike rate component (efficiency)
+        - Average component (dismissal tendency) 
+        - Dot ball component (pressure building ability)
+        - Weights adjusted based on game phase
+        - Confidence factor based on sample size
+        
+        Returns a score from 0-100 where higher values indicate greater vulnerability
+        """
+        # Base components
+        sr_component = 0
+        avg_component = 0
+        
+        # Strike rate component (batting efficiency)
+        balls_faced = stats['balls']
+        if balls_faced >= 10:  # Minimum sample size
+            if stats['strike_rate'] > 0:
+                sr_component = 100 / stats['strike_rate']
+            else:
+                sr_component = 2.0  # High penalty for zero strike rate
+        
+        # Average component (dismissal tendency)
+        if stats['dismissals'] > 0:
+            avg_component = 100 / stats['average']
+        else:
+            # If no dismissals, use a function of balls faced
+            avg_component = 0.5 * math.exp(-balls_faced/30)
+        
+        # Default weights
+        weights = {
+            'sr': 0.5,
+            'avg': 0.5
+        }
+        
+        # Calculate phase-specific weight adjustments if phase info is available
+        phase = stats.get('phase', None)
+        if phase == 1:  # Powerplay
+            weights['sr'] = 0.5
+            weights['avg'] = 0.5
+        elif phase == 3:  # Death overs
+            weights['sr'] = 0.5
+            weights['avg'] = 0.5
+        
+        # Confidence factor based on sample size
+        confidence = min(1.0, balls_faced / 30)
+        
+        # Calculate weighted vulnerability
+        raw_vulnerability = (
+            weights['sr'] * sr_component + 
+            weights['avg'] * avg_component
+        )
+        
+        # Scale by confidence and normalize to 0-100 range
+        vulnerability = raw_vulnerability * confidence * 20
+        
+        # Cap at 100
+        return min(100, vulnerability)
+
     def _create_batter_profiles(self):
         """Create profiles for batters based on their performance"""
         profiles = {}
@@ -45,6 +106,9 @@ class BatterVulnerabilityAnalyzer:
                 total_runs = batter_data['score'].sum()
                 total_balls = len(batter_data)
                 dismissals = batter_data['out'].sum()
+                
+                # Count dot balls
+                dot_balls = len(batter_data[batter_data['score'] == 0])
                 
                 # Get batting hand if available
                 bat_hand = batter_data['bat_hand'].mode().iloc[0] if 'bat_hand' in batter_data.columns else "Unknown"
@@ -62,14 +126,28 @@ class BatterVulnerabilityAnalyzer:
                 # Process line and length data
                 line_length_stats = self._process_line_length_data(batter_data)
                 
+                # Calculate overall vulnerability
+                overall_stats = {
+                    'runs': total_runs,
+                    'balls': total_balls,
+                    'dismissals': dismissals,
+                    'strike_rate': strike_rate,
+                    'average': average,
+                    'dot_balls': dot_balls
+                }
+                
+                vulnerability_score = self.calculate_vulnerability(overall_stats)
+                
                 # Store the complete profile
                 profiles[batter] = {
                     'bat_hand': bat_hand,
                     'total_runs': int(total_runs),
                     'total_balls': int(total_balls),
                     'dismissals': int(dismissals),
+                    'dot_balls': int(dot_balls),
                     'strike_rate': strike_rate,
                     'average': average,
+                    'vulnerability': vulnerability_score,
                     'by_phase': phase_stats,
                     'vs_bowler_styles': bowl_style_dict,
                     'vs_line_length': line_length_stats
@@ -91,14 +169,22 @@ class BatterVulnerabilityAnalyzer:
                     runs = phase_data['score'].sum()
                     balls = len(phase_data)
                     outs = phase_data['out'].sum()
+                    dot_balls = len(phase_data[phase_data['score'] == 0])
                     
-                    phase_stats[phase] = {
+                    stats = {
                         'runs': int(runs),
                         'balls': int(balls),
                         'dismissals': int(outs),
+                        'dot_balls': int(dot_balls),
                         'strike_rate': DataProcessor.calculate_strike_rate(runs, balls),
-                        'average': DataProcessor.calculate_average(runs, outs)
+                        'average': DataProcessor.calculate_average(runs, outs),
+                        'phase': phase  # Include phase info for vulnerability calculation
                     }
+                    
+                    # Calculate vulnerability for this phase
+                    stats['vulnerability'] = self.calculate_vulnerability(stats)
+                    
+                    phase_stats[phase] = stats
         
         return phase_stats if phase_stats else None
     
@@ -115,15 +201,22 @@ class BatterVulnerabilityAnalyzer:
                 runs = style_data['score'].sum()
                 balls = len(style_data)
                 outs = style_data['out'].sum()
+                dot_balls = len(style_data[style_data['score'] == 0])
                 
                 if balls >= 3:
-                    bowl_style_dict[style] = {
+                    stats = {
                         'runs': int(runs),
                         'balls': int(balls),
                         'dismissals': int(outs),
+                        'dot_balls': int(dot_balls),
                         'strike_rate': DataProcessor.calculate_strike_rate(runs, balls),
                         'average': DataProcessor.calculate_average(runs, outs)
                     }
+                    
+                    # Calculate vulnerability for this bowling style
+                    stats['vulnerability'] = self.calculate_vulnerability(stats)
+                    
+                    bowl_style_dict[style] = stats
         
         return bowl_style_dict if bowl_style_dict else None
     
@@ -139,18 +232,25 @@ class BatterVulnerabilityAnalyzer:
                 runs = ll_data['score'].sum()
                 balls = len(ll_data)
                 outs = ll_data['out'].sum()
+                dot_balls = len(ll_data[ll_data['score'] == 0])
                 
                 if balls >= 3:
                     line_display = DataProcessor.LINE_DISPLAY.get(int(line), 'Unknown')
                     length_display = DataProcessor.LENGTH_DISPLAY.get(int(length), 'Unknown')
                     
-                    line_length_stats[(line_display, length_display)] = {
+                    stats = {
                         'runs': int(runs),
                         'balls': int(balls),
                         'dismissals': int(outs),
+                        'dot_balls': int(dot_balls),
                         'strike_rate': DataProcessor.calculate_strike_rate(runs, balls),
                         'average': DataProcessor.calculate_average(runs, outs)
                     }
+                    
+                    # Calculate vulnerability for this line/length
+                    stats['vulnerability'] = self.calculate_vulnerability(stats)
+                    
+                    line_length_stats[(line_display, length_display)] = stats
         
         return line_length_stats if line_length_stats else None
     
@@ -229,3 +329,50 @@ class BatterVulnerabilityAnalyzer:
                 all_styles.update(profile['vs_bowler_styles'].keys())
         
         return sorted([s for s in all_styles if s != '-' and s != ''])
+    
+    def get_vulnerability_ranking(self, batter, category=None):
+        """
+        Return vulnerability ranking for a batter by different categories
+        
+        Parameters:
+        - batter: Name of the batter to analyze
+        - category: Optional category to rank (e.g., 'vs_bowler_styles', 'vs_line_length', 'by_phase')
+                   If None, returns all categories
+        
+        Returns:
+        - Dictionary with categories ranked by vulnerability
+        """
+        profile = self.batter_profiles.get(batter)
+        if not profile:
+            return None
+            
+        results = {}
+        
+        # Analyze by bowling styles
+        if (category is None or category == 'vs_bowler_styles') and profile.get('vs_bowler_styles'):
+            styles_ranked = sorted(
+                [(style, data['vulnerability']) for style, data in profile['vs_bowler_styles'].items()],
+                key=lambda x: x[1], 
+                reverse=True
+            )
+            results['vs_bowler_styles'] = styles_ranked
+            
+        # Analyze by line/length
+        if (category is None or category == 'vs_line_length') and profile.get('vs_line_length'):
+            ll_ranked = sorted(
+                [(f"{ll[0]}-{ll[1]}", data['vulnerability']) for ll, data in profile['vs_line_length'].items()],
+                key=lambda x: x[1], 
+                reverse=True
+            )
+            results['vs_line_length'] = ll_ranked
+            
+        # Analyze by game phase
+        if (category is None or category == 'by_phase') and profile.get('by_phase'):
+            phase_ranked = sorted(
+                [(phase, data['vulnerability']) for phase, data in profile['by_phase'].items()],
+                key=lambda x: x[1], 
+                reverse=True
+            )
+            results['by_phase'] = phase_ranked
+            
+        return results if results else None
