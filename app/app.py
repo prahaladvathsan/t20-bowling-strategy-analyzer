@@ -22,29 +22,15 @@ from utils.visualization import (
     create_field_placement_visualization,
     get_strategy_visualization,
     create_bowler_economy_heatmap,
-    create_bowler_strike_rate_heatmap
+    create_bowler_strike_rate_heatmap,
+    create_phase_vulnerability_heatmap,
+    create_style_vulnerability_heatmap
 )
 
-def load_and_process_data():
-    """Load pre-processed data from saved files"""
+def load_analyzers():
+    """Load analyzers with saved data"""
     try:
-        # Load processed data from parquet file
-        db_path = Path(__file__).parent.parent / "db"
-        data_path = db_path / "processed_data.parquet"
-        
-        if not data_path.exists():
-            return None, "Processed data not found. Please run the backend processor first."
-            
-        data = pd.read_parquet(data_path)
-        return data, None
-        
-    except Exception as e:
-        return None, str(e)
-
-def initialize_analyzers(data=None):
-    """Initialize analyzers with saved data"""
-    try:
-        # Initialize analyzers without data to load from saved files
+        # Initialize analyzers to load from saved files
         batter_analyzer = BatterVulnerabilityAnalyzer()
         bowler_analyzer = BowlerAnalyzer()
         plan_generator = BowlingPlanGenerator()
@@ -57,29 +43,6 @@ def initialize_analyzers(data=None):
     except Exception as e:
         return None, str(e)
 
-def format_metric_value(value, format_type='float'):
-    """Utility function to format metric values"""
-    if format_type == 'float':
-        return f"{value:.2f}" if value != float('inf') else "No dismissals"
-    return str(value)
-
-def display_phase_performance(phase_data, batter_name):
-    """Utility function to display phase performance"""
-    if not phase_data:
-        st.write("No phase-wise data available.")
-        return
-        
-    for phase, stats in phase_data.items():
-        phase_name = DataProcessor.PHASE_NAMES.get(phase, f"Phase {phase}")
-        with st.expander(phase_name, expanded=True):
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Strike Rate", format_metric_value(stats['strike_rate']))
-            with col2:
-                st.metric("Average", format_metric_value(stats['average']))
-            with col3:
-                st.metric("Runs/Balls", f"{stats['runs']}/{stats['balls']}")
-
 # Page configuration
 st.set_page_config(
     page_title="T20 Bowling Strategy Analyzer",
@@ -91,13 +54,11 @@ st.set_page_config(
 # Initialize session state
 if 'initialized' not in st.session_state:
     st.session_state.initialized = True
-    st.session_state.data = None
     st.session_state.batter_analyzer = None
     st.session_state.bowler_analyzer = None
     st.session_state.plan_generator = None
     st.session_state.current_page = "Batter Analysis"
     st.session_state.app_started = False
-    st.session_state.data_loaded = False
     st.session_state.analyzers_initialized = False
 
 # App title and description
@@ -114,51 +75,31 @@ if not st.session_state.app_started:
         st.rerun()
     st.stop()
 
-# Sidebar for data input and global controls
+# Sidebar for navigation
 with st.sidebar:
-    st.header("Data Input")
+    st.header("Navigation")
     
-    if not st.session_state.data_loaded:
-        with st.spinner("Loading and processing data..."):
-            data, error = load_and_process_data()
+    if not st.session_state.analyzers_initialized:
+        with st.spinner("Initializing analyzers..."):
+            analyzers, error = load_analyzers()
             if error:
-                st.error(f"Error: {error}")
+                st.error(f"Error initializing analyzers: {error}")
             else:
-                st.session_state.data = data
-                st.session_state.data_loaded = True
-                st.success("Data loaded and processed successfully")
-                
-                # Initialize analyzers
-                analyzers, error = initialize_analyzers(data)
-                if error:
-                    st.error(f"Error initializing analyzers: {error}")
-                else:
-                    st.session_state.batter_analyzer = analyzers['batter_analyzer']
-                    st.session_state.bowler_analyzer = analyzers['bowler_analyzer']
-                    st.session_state.plan_generator = analyzers['plan_generator']
-                    st.session_state.analyzers_initialized = True
-                    st.success("Analyzers initialized successfully")
-    else:
-        # Show navigation only after data is loaded
-        st.markdown("---")
-        st.header("Navigation")
-        
-        # Navigation options
-        page = st.radio(
-            "Select Analysis",
-            ["Batter Analysis", "Bowler Strategies", "Match-up Optimization", "Complete Bowling Plan"],
-            index=0,
-            key="page_selection"
-        )
-        
-        # Update current page in session state
-        st.session_state.current_page = page
+                st.session_state.batter_analyzer = analyzers['batter_analyzer']
+                st.session_state.bowler_analyzer = analyzers['bowler_analyzer']
+                st.session_state.plan_generator = analyzers['plan_generator']
+                st.session_state.analyzers_initialized = True
+                st.success("Analyzers initialized successfully")
+    
+    # Navigation options
+    st.session_state.current_page = st.radio(
+        "Select Analysis",
+        ["Batter Analysis", "Bowler Strategies", "Match-up Optimization", "Complete Bowling Plan"],
+        index=0,
+        key="page_selection"
+    )
 
 # Main content area based on selection
-if not st.session_state.data_loaded:
-    st.info("Please wait while the data is being loaded and processed...")
-    st.stop()
-
 # Update phase definitions where they appear
 phase_names = {
     1: "Powerplay (Overs 1-6)",
@@ -172,7 +113,7 @@ if st.session_state.current_page == "Batter Analysis":
     st.header("Batter Vulnerability Analysis")
     
     # Batter selection
-    batters = sorted(st.session_state.data['bat'].unique())
+    batters = sorted(st.session_state.batter_analyzer.get_all_batters())
     selected_batter = st.selectbox("Select Batter", batters)
     
     if selected_batter:
@@ -246,6 +187,7 @@ if st.session_state.current_page == "Batter Analysis":
                     # Bar chart of performance against different bowler types
                     st.subheader("Performance vs Bowler Types")
                     
+                    # Get bowling styles data
                     bowl_types = batter_profile.get('vs_bowler_types', {})
                     if bowl_types:
                         bowl_data = []
@@ -294,246 +236,92 @@ if st.session_state.current_page == "Batter Analysis":
                     
                     # Get phase data
                     phase_data = batter_profile.get('by_phase', {})
-                    display_phase_performance(phase_data, selected_batter)
+                    phase_line_length_data = batter_profile.get('phase_line_length', {})
+                    
+                    # Add phase selector
+                    phase_options = {
+                        '1': "Powerplay (Overs 1-6)",
+                        '2': "Early Middle (Overs 7-12)",
+                        '3': "Late Middle (Overs 13-16)",
+                        '4': "Death (Overs 17-20)"
+                    }
+                    selected_phase = st.selectbox(
+                        "Select Phase",
+                        options=list(phase_options.keys()),
+                        format_func=lambda x: phase_options[x],
+                        key="phase_selector"
+                    )
+                    
+                    if selected_phase:
+                        # Display phase performance metrics in a single row using columns
+                        if phase_data and selected_phase in phase_data:
+                            phase_stats = phase_data[selected_phase]
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Strike Rate", f"{phase_stats['strike_rate']:.2f}")
+                            with col2:
+                                st.metric("Average", f"{phase_stats['average']:.2f}")
+                            with col3:
+                                st.metric("Runs/Balls", f"{phase_stats['runs']}/{phase_stats['balls']}")
+                        else:
+                            st.write("No data available for this phase.")
+                        
+                        # Display phase-wise line-length heatmap below the stats
+                        if phase_line_length_data and selected_phase in phase_line_length_data:
+                            phase_ll_stats = phase_line_length_data[selected_phase]
+                            try:
+                                st.write("") # Add some spacing
+                                heatmap_fig = create_phase_vulnerability_heatmap(phase_ll_stats)
+                                st.pyplot(heatmap_fig)
+                            except Exception as e:
+                                st.error(f"Error creating phase vulnerability heatmap: {e}")
+                                st.write("Not enough data to create a meaningful heatmap for this phase.")
+                        else:
+                            st.write("Not enough line-length data available for this phase.")
                 
                 with tab4:
                     st.subheader("Performance by Bowling Style")
                     
-                    # Check if bowl_style column exists in the data
-                    if 'bowl_style' not in st.session_state.data.columns:
-                        st.warning("The dataset does not contain bowling style information. This tab requires the 'bowl_style' column.")
-                    else:
-                        # Get bowling styles faced by this batter
-                        batter_data = st.session_state.data[st.session_state.data['bat'] == selected_batter]
-                        batter_styles = batter_data['bowl_style'].dropna().unique()
-                        valid_styles = [s for s in batter_styles if s != '-' and s != '']
+                    # Get bowling style data
+                    bowl_styles = st.session_state.batter_analyzer.get_available_bowl_styles()
+                    
+                    # Add bowling style selector
+                    selected_style = st.selectbox(
+                        "Select Bowling Style",
+                        options=bowl_styles,
+                        key="style_selector"
+                    )
+                    
+                    if selected_style:
+                        col1, col2 = st.columns([1, 1])
                         
-                        if not valid_styles:
-                            st.info(f"No valid bowling style data found for {selected_batter}.")
-                        else:
-                            # Create a simple analysis of styles on the fly if needed
-                            if not batter_profile.get('vs_bowler_styles'):
-                                st.info("Building bowling style analysis directly from dataset...")
-                                
-                                # Create a dictionary to hold the style data
-                                style_data = {}
-                                
-                                for style in valid_styles:
-                                    style_balls = batter_data[batter_data['bowl_style'] == style]
-                                    
-                                    if len(style_balls) >= 3:  # Minimum 3 balls for analysis
-                                        runs = style_balls['score'].sum()
-                                        balls = len(style_balls)
-                                        outs = style_balls['out'].sum()
-                                        
-                                        sr = (runs / balls * 100) if balls > 0 else 0
-                                        avg = (runs / outs) if outs > 0 else float('inf')
-                                        
-                                        style_data[style] = {
-                                            'style': style,
-                                            'runs': int(runs),
-                                            'balls': int(balls),
-                                            'dismissals': int(outs),
-                                            'strike_rate': sr,
-                                            'average': avg
-                                        }
-                                
-                                # Create a DataFrame for visualization
-                                if style_data:
-                                    styles_df = pd.DataFrame([v for v in style_data.values()])
-                                    styles_df = styles_df.sort_values('strike_rate', ascending=False)
-                                    
-                                    # Display bar chart
-                                    st.subheader(f"{selected_batter}'s Performance by Bowling Style")
-                                    
-                                    fig, ax = plt.subplots(figsize=(12, 6))
-                                    bars = ax.bar(styles_df['style'], styles_df['strike_rate'], color='coral')
-                                    
-                                    # Add data labels
-                                    for i, bar in enumerate(bars):
-                                        height = bar.get_height()
-                                        ax.text(bar.get_x() + bar.get_width()/2., height + 0.1,
-                                                f"{height:.1f}", ha='center', va='bottom', rotation=0)
-                                    
-                                    ax.set_title(f"{selected_batter}'s Strike Rate vs Different Bowling Styles")
-                                    ax.set_xlabel("Bowling Style")
-                                    ax.set_ylabel("Strike Rate")
-                                    plt.xticks(rotation=45, ha='right')
-                                    plt.tight_layout()
-                                    
-                                    st.pyplot(fig)
-                                    
-                                    # Display data table
-                                    st.subheader("Style Statistics")
-                                    st.dataframe(styles_df)
-                                    
-                                    # Add explanation of bowling styles
-                                    style_explanations = {
-                                        'RF': 'Right-arm Fast',
-                                        'RFM': 'Right-arm Fast-Medium',
-                                        'LB': 'Leg Break',
-                                        'LWS': 'Left-arm Wrist Spin',
-                                        'RMF': 'Right-arm Medium-Fast',
-                                        'SLA': 'Slow Left-arm Orthodox',
-                                        'OB': 'Off Break',
-                                        'LBG': 'Leg Break Googly',
-                                        'LFM': 'Left-arm Fast-Medium',
-                                        'LF': 'Left-arm Fast',
-                                        'RM': 'Right-arm Medium',
-                                        'LMF': 'Left-arm Medium-Fast',
-                                        'LM': 'Left-arm Medium'
-                                    }
-                                    
-                                    st.subheader("Bowling Style Legend")
-                                    legend_data = []
-                                    for style in sorted(style_data.keys()):
-                                        explanation = style_explanations.get(style, f"Unknown style ({style})")
-                                        legend_data.append({"Style": style, "Description": explanation})
-                                    
-                                    st.table(pd.DataFrame(legend_data))
-                                else:
-                                    st.info(f"Not enough data for meaningful bowling style analysis for {selected_batter}.")
+                        with col1:
+                            # Display style performance metrics
+                            style_stats = st.session_state.batter_analyzer.analyze_batter_vs_bowl_style(selected_batter, selected_style)
+                            if style_stats:
+                                st.metric("Strike Rate", style_stats['strike_rate'])
+                                st.metric("Average", (style_stats['average']))
+                                st.metric("Runs/Balls", f"{style_stats['runs']}/{style_stats['balls']}")
                             else:
-                                # Use the pre-calculated profiles if available
-                                bowl_styles = batter_profile.get('vs_bowler_styles', {})
-                                
-                                if bowl_styles:
-                                    # Get all available bowling styles
-                                    if hasattr(st.session_state.batter_analyzer, 'get_available_bowl_styles'):
-                                        available_styles = st.session_state.batter_analyzer.get_available_bowl_styles()
-                                    else:
-                                        available_styles = sorted(bowl_styles.keys())
-                                    
-                                    # Create style selection dropdown
-                                    style_options = ["All Styles"] + available_styles
-                                    selected_style_option = st.selectbox("Select Bowling Style", style_options, key="style_dropdown")
-                                    
-                                    if selected_style_option == "All Styles":
-                                        # Display data for all styles
-                                        style_data = []
-                                        for style, stats in bowl_styles.items():
-                                            style_data.append({
-                                                'style': style,
-                                                'strike_rate': stats['strike_rate'],
-                                                'average': stats['average'] if stats['average'] != float('inf') else None,
-                                                'runs': stats['runs'],
-                                                'balls': stats['balls'],
-                                                'dismissals': stats['dismissals']
-                                            })
-                                        
-                                        if style_data:
-                                            # Convert to DataFrame and sort
-                                            style_df = pd.DataFrame(style_data)
-                                            style_df = style_df.sort_values('strike_rate', ascending=False)
-                                            
-                                            # Display bar chart for strike rates
-                                            fig, ax = plt.subplots(figsize=(12, 8))
-                                            bars = ax.bar(style_df['style'], style_df['strike_rate'], color='coral')
-                                            
-                                            # Add data labels
-                                            for i, bar in enumerate(bars):
-                                                height = bar.get_height()
-                                                ax.text(bar.get_x() + bar.get_width()/2., height + 0.1,
-                                                        f"{height:.1f}", ha='center', va='bottom', rotation=0)
-                                            
-                                            ax.set_title(f"{selected_batter}'s Strike Rate vs Different Bowling Styles")
-                                            ax.set_xlabel("Bowling Style")
-                                            ax.set_ylabel("Strike Rate")
-                                            plt.xticks(rotation=45, ha='right')
-                                            plt.tight_layout()
-                                            
-                                            st.pyplot(fig)
-                                            
-                                            # Add tooltip explanation of bowling styles
-                                            st.caption("""
-                                            **Bowling Style Legend:**
-                                            - RF: Right-arm Fast
-                                            - RFM: Right-arm Fast-Medium
-                                            - LB: Leg Break
-                                            - LWS: Left-arm Wrist Spin
-                                            - RMF: Right-arm Medium-Fast
-                                            - SLA: Slow Left-arm Orthodox
-                                            - OB: Off Break
-                                            - LBG: Leg Break Googly
-                                            - LFM: Left-arm Fast-Medium
-                                            - LF: Left-arm Fast
-                                            - RM: Right-arm Medium
-                                            - LMF: Left-arm Medium-Fast
-                                            """)
-                                            
-                                            # Display data table
-                                            st.subheader("Style Statistics")
-                                            st.dataframe(style_df)
-                                        else:
-                                            st.write("Not enough data across bowling styles for meaningful analysis.")
-                                    else:
-                                        # Show specific style analysis
-                                        selected_style = selected_style_option
-                                        style_stats = bowl_styles.get(selected_style)
-                                        
-                                        if style_stats:
-                                            st.write(f"### {selected_batter}'s Performance Against {selected_style}")
-                                            
-                                            col1, col2, col3 = st.columns(3)
-                                            with col1:
-                                                st.metric("Strike Rate", f"{style_stats['strike_rate']:.2f}")
-                                            with col2:
-                                                avg_val = "No dismissals" if style_stats['average'] == float('inf') else f"{style_stats['average']:.2f}"
-                                                st.metric("Average", avg_val)
-                                            with col3:
-                                                st.metric("Runs / Balls", f"{style_stats['runs']} / {style_stats['balls']}")
-                                            
-                                            # Check if we have phase data for this style
-                                            phase_style_data = []
-                                            if batter_profile.get('phase_bowl_style'):
-                                                for phase, styles in batter_profile['phase_bowl_style'].items():
-                                                    if selected_style in styles:
-                                                        phase_style_data.append({
-                                                            'phase': phase_names.get(phase, f"Phase {phase}"),
-                                                            'phase_num': phase,
-                                                            'strike_rate': styles[selected_style]['strike_rate'],
-                                                            'average': styles[selected_style]['average'] if styles[selected_style]['average'] != float('inf') else None,
-                                                            'balls': styles[selected_style]['balls']
-                                                        })
-                                            
-                                            if phase_style_data:
-                                                st.subheader(f"Performance Against {selected_style} by Phase")
-                                                
-                                                # Create DataFrame and sort by phase
-                                                phase_style_df = pd.DataFrame(phase_style_data)
-                                                phase_style_df = phase_style_df.sort_values('phase_num')
-                                                
-                                                # Display bar chart
-                                                fig, ax = plt.subplots(figsize=(10, 6))
-                                                bars = ax.bar(phase_style_df['phase'], phase_style_df['strike_rate'], color='purple')
-                                                
-                                                # Add data labels
-                                                for i, bar in enumerate(bars):
-                                                    height = bar.get_height()
-                                                    ax.text(bar.get_x() + bar.get_width()/2., height + 0.1,
-                                                            f"{height:.1f}", ha='center', va='bottom', rotation=0)
-                                                
-                                                ax.set_title(f"{selected_batter}'s Strike Rate vs {selected_style} Across Phases")
-                                                ax.set_xlabel("Phase")
-                                                ax.set_ylabel("Strike Rate")
-                                                plt.xticks(rotation=45, ha='right')
-                                                plt.tight_layout()
-                                                
-                                                st.pyplot(fig)
-                                                
-                                                # Display data table
-                                                st.dataframe(phase_style_df[['phase', 'strike_rate', 'average', 'balls']])
-                                            else:
-                                                st.write("No phase-specific data available for this bowling style.")
-                                        else:
-                                            st.write(f"No data available for {selected_batter} against {selected_style}.")
-                                else:
-                                    st.write("No detailed bowling style data available in the pre-processed profiles.")
+                                st.write("No data available for this bowling style.")
+                        
+                        with col2:
+                            # Display style-wise line-length heatmap
+                            style_ll_stats = st.session_state.batter_analyzer.analyze_style_line_length(selected_batter, selected_style)
+                            if style_ll_stats:
+                                try:
+                                    heatmap_fig = create_style_vulnerability_heatmap(style_ll_stats)
+                                    st.pyplot(heatmap_fig)
+                                except Exception as e:
+                                    st.error(f"Error creating style vulnerability heatmap: {e}")
+                                    st.write("Not enough data to create a meaningful heatmap for this bowling style.")
+                            else:
+                                st.write("Not enough line-length data available for this bowling style.")
 elif st.session_state.current_page == "Bowler Strategies":
     st.header("Optimal Bowling Strategies")
     
     # Bowler selection
-    bowlers = sorted(st.session_state.data['bowl'].unique())
+    bowlers = sorted(st.session_state.bowler_analyzer.get_all_bowlers())
     selected_bowler = st.selectbox("Select Bowler", bowlers)
     
     if selected_bowler:
@@ -612,12 +400,12 @@ elif st.session_state.current_page == "Match-up Optimization":
     
     with col1:
         # Batter selection
-        batters = sorted(st.session_state.data['bat'].unique())
+        batters = sorted(st.session_state.batter_analyzer.get_all_batters())
         selected_batter = st.selectbox("Select Batter", batters)
     
     with col2:
         # Bowler type selection (for filtering)
-        all_bowl_types = st.session_state.data['bowl_kind'].unique()
+        all_bowl_types = st.session_state.bowler_analyzer.get_all_bowler_types()
         selected_types = st.multiselect(
             "Filter by Bowler Types (optional)",
             options=all_bowl_types,
@@ -628,20 +416,7 @@ elif st.session_state.current_page == "Match-up Optimization":
         st.subheader(f"Optimal Bowling Strategies vs {selected_batter}")
         
         # Get all available bowlers
-        available_bowlers = []
-        
-        for bowler in st.session_state.data['bowl'].unique():
-            bowler_profile = st.session_state.bowler_analyzer.get_bowler_profile(bowler)
-            if bowler_profile:
-                bowl_type = bowler_profile.get('bowl_kind', 'Unknown')
-                
-                # Apply filter if selected
-                if not selected_types or bowl_type in selected_types:
-                    available_bowlers.append({
-                        'name': bowler,
-                        'type': bowl_type,
-                        'style': bowler_profile.get('bowl_style', 'Unknown')
-                    })
+        available_bowlers = st.session_state.bowler_analyzer.get_filtered_bowlers(selected_types)
         
         if hasattr(st.session_state, 'plan_generator') and st.session_state.plan_generator:
             # Get matchup recommendations
@@ -703,7 +478,7 @@ elif st.session_state.current_page == "Complete Bowling Plan":
     st.header("Comprehensive Bowling Plan Generator")
     
     # Batter selection
-    batters = sorted(st.session_state.data['bat'].unique())
+    batters = sorted(st.session_state.batter_analyzer.get_all_batters())
     selected_batter = st.selectbox("Select Batter", batters)
     
     col1, col2 = st.columns(2)
@@ -726,16 +501,7 @@ elif st.session_state.current_page == "Complete Bowling Plan":
     
     if selected_batter and hasattr(st.session_state, 'plan_generator') and st.session_state.plan_generator:
         # Get all available bowlers
-        available_bowlers = []
-        
-        for bowler in st.session_state.data['bowl'].unique():
-            bowler_profile = st.session_state.bowler_analyzer.get_bowler_profile(bowler)
-            if bowler_profile:
-                available_bowlers.append({
-                    'name': bowler,
-                    'type': bowler_profile.get('bowl_kind', 'Unknown'),
-                    'style': bowler_profile.get('bowl_style', 'Unknown')
-                })
+        available_bowlers = st.session_state.bowler_analyzer.get_all_bowlers()
         
         # Generate comprehensive bowling plan
         plan = st.session_state.plan_generator.generate_complete_bowling_plan(

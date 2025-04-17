@@ -25,7 +25,6 @@ class Backend:
         # Process data
         processor = DataProcessor(data)
         processed_data = processor.process()
-        
         # Initialize analyzers
         print("Initializing analyzers...")
         batter_analyzer = BatterVulnerabilityAnalyzer(processed_data)

@@ -128,3 +128,7 @@ class BowlerAnalyzer:
         recommendations.sort(key=lambda x: x['effectiveness'])
         
         return recommendations[:3]  # Return top 3 recommendations
+    
+    def get_all_bowlers(self):
+        """Return a list of all bowlers in the profiles"""
+        return list(self.bowler_profiles.keys())

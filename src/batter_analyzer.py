@@ -125,7 +125,25 @@ class BatterVulnerabilityAnalyzer:
                 
                 # Process line and length data
                 line_length_stats = self._process_line_length_data(batter_data)
-                
+
+                # Process phase-wise line and length data
+                phase_line_length_stats = {}
+                if 'phase' in batter_data.columns:
+                    for phase, phase_data in batter_data.groupby('phase'):
+                        print(f"Processing phase {phase} for batter {batter}")
+                        print(f"Phase data size: {len(phase_data)}")
+                        phase_line_length_stats[phase] = self._process_line_length_data(phase_data, is_phase_analysis=True)
+
+                # Process bowler-style-wise line and length data
+                style_line_length_stats = {}
+                if 'bowl_style' in batter_data.columns:
+                    for style, style_data in batter_data.groupby('bowl_style'):
+                        if pd.isna(style) or style == '-' or style == '':
+                            continue
+                        print(f"Processing style {style} for batter {batter}")
+                        print(f"Style data size: {len(style_data)}")
+                        style_line_length_stats[style] = self._process_line_length_data(style_data, is_phase_analysis=True)  # Using lower threshold like phase analysis
+
                 # Calculate overall vulnerability
                 overall_stats = {
                     'runs': total_runs,
@@ -150,7 +168,9 @@ class BatterVulnerabilityAnalyzer:
                     'vulnerability': vulnerability_score,
                     'by_phase': phase_stats,
                     'vs_bowler_styles': bowl_style_dict,
-                    'vs_line_length': line_length_stats
+                    'vs_line_length': line_length_stats,
+                    'phase_line_length': phase_line_length_stats,
+                    'style_line_length': style_line_length_stats
                 }
                 
             except Exception as e:
@@ -185,6 +205,8 @@ class BatterVulnerabilityAnalyzer:
                     stats['vulnerability'] = self.calculate_vulnerability(stats)
                     
                     phase_stats[phase] = stats
+            # Debug statement to check if there is data
+            # print("Phase stats:", phase_stats)
         
         return phase_stats if phase_stats else None
     
@@ -220,7 +242,7 @@ class BatterVulnerabilityAnalyzer:
         
         return bowl_style_dict if bowl_style_dict else None
     
-    def _process_line_length_data(self, batter_data):
+    def _process_line_length_data(self, batter_data, is_phase_analysis=False):
         """Process line and length data for a batter"""
         line_length_stats = {}
         
@@ -234,7 +256,10 @@ class BatterVulnerabilityAnalyzer:
                 outs = ll_data['out'].sum()
                 dot_balls = len(ll_data[ll_data['score'] == 0])
                 
-                if balls >= 3:
+                # Use lower threshold
+                min_balls = 1 
+                
+                if balls >= min_balls:
                     line_display = DataProcessor.LINE_DISPLAY.get(int(line), 'Unknown')
                     length_display = DataProcessor.LENGTH_DISPLAY.get(int(length), 'Unknown')
                     
@@ -314,6 +339,22 @@ class BatterVulnerabilityAnalyzer:
             # Return specific phase and style
             return profile.get('phase_bowl_style', {}).get(phase, {}).get(style)
     
+    def analyze_style_line_length(self, batter, style=None):
+        """Return style-specific line/length analysis for a batter"""
+        profile = self.batter_profiles.get(batter)
+        if not profile:
+            return None
+            
+        # Return all styles if no specific style requested
+        if style is None:
+            return profile.get('style_line_length')
+        
+        # Return specific style data
+        if profile.get('style_line_length') and style in profile['style_line_length']:
+            return profile['style_line_length'][style]
+        
+        return None
+
     def get_available_bowl_styles(self):
         """Return a list of all bowling styles in the data"""
         # If we have live data, use that
@@ -376,3 +417,33 @@ class BatterVulnerabilityAnalyzer:
             results['by_phase'] = phase_ranked
             
         return results if results else None
+
+    def get_all_batters(self):
+        """Return a list of all batters in the profiles"""
+        return list(self.batter_profiles.keys())
+
+    def get_data_columns(self):
+        """Return a list of columns in the data"""
+        if self.data is not None:
+            print("Data columns:", self.data.keys())
+            return list(self.data.keys())
+        return []  # Return empty list if no data is loaded
+
+    def analyze_bowling_styles(self, batter):
+        """Analyze batter's performance against different bowling styles"""
+        bowl_style_data = self.analyze_batter_vs_bowl_style(batter)
+        if not bowl_style_data:
+            return None
+            
+        style_analysis = []
+        for style, stats in bowl_style_data.items():
+            style_analysis.append({
+                'style': style,
+                'strike_rate': stats['strike_rate'],
+                'average': stats['average'],
+                'balls': stats['balls'],
+                'dismissals': stats['dismissals'],
+                'vulnerability': stats['vulnerability']
+            })
+        
+        return style_analysis

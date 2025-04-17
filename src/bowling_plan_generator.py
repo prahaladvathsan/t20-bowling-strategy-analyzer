@@ -93,7 +93,7 @@ class BowlingPlanGenerator:
         
         return profiles
     
-    def _process_line_length_data(self, data):
+    def _process_line_length_data(self, data, is_phase_analysis=False):
         """Process line and length data for analysis"""
         stats = {}
         
@@ -111,7 +111,8 @@ class BowlingPlanGenerator:
             balls = len(ll_data)
             dismissals = ll_data['out'].sum()
             
-            if balls >= 3:
+            min_balls = 1 
+            if balls >= min_balls:
                 stats[(int(line), int(length))] = {  # Ensure numeric keys
                     'runs': runs,
                     'balls': balls,
