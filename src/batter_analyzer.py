@@ -181,103 +181,20 @@ class BatterVulnerabilityAnalyzer:
 
     def _process_phase_data(self, batter_data):
         """Process phase-specific data for a batter"""
-        phase_stats = {}
-        
-        if 'phase' in batter_data.columns:
-            for phase, phase_data in batter_data.groupby('phase'):
-                if len(phase_data) > 0:
-                    runs = phase_data['score'].sum()
-                    balls = len(phase_data)
-                    outs = phase_data['out'].sum()
-                    dot_balls = len(phase_data[phase_data['score'] == 0])
-                    
-                    stats = {
-                        'runs': int(runs),
-                        'balls': int(balls),
-                        'dismissals': int(outs),
-                        'dot_balls': int(dot_balls),
-                        'strike_rate': DataProcessor.calculate_strike_rate(runs, balls),
-                        'average': DataProcessor.calculate_average(runs, outs),
-                        'phase': phase  # Include phase info for vulnerability calculation
-                    }
-                    
-                    # Calculate vulnerability for this phase
-                    stats['vulnerability'] = self.calculate_vulnerability(stats)
-                    
-                    phase_stats[phase] = stats
-            # Debug statement to check if there is data
-            # print("Phase stats:", phase_stats)
-        
-        return phase_stats if phase_stats else None
+        return self._process_grouped_data(batter_data, 'phase', min_balls=10)
     
     def _process_bowling_style_data(self, batter_data):
         """Process bowling style matchup data for a batter"""
-        bowl_style_dict = {}
-        
-        if 'bowl_style' in batter_data.columns:
-            for style in batter_data['bowl_style'].unique():
-                if pd.isna(style) or style == '-' or style == '':
-                    continue
-                
-                style_data = batter_data[batter_data['bowl_style'] == style]
-                runs = style_data['score'].sum()
-                balls = len(style_data)
-                outs = style_data['out'].sum()
-                dot_balls = len(style_data[style_data['score'] == 0])
-                
-                if balls >= 3:
-                    stats = {
-                        'runs': int(runs),
-                        'balls': int(balls),
-                        'dismissals': int(outs),
-                        'dot_balls': int(dot_balls),
-                        'strike_rate': DataProcessor.calculate_strike_rate(runs, balls),
-                        'average': DataProcessor.calculate_average(runs, outs)
-                    }
-                    
-                    # Calculate vulnerability for this bowling style
-                    stats['vulnerability'] = self.calculate_vulnerability(stats)
-                    
-                    bowl_style_dict[style] = stats
-        
-        return bowl_style_dict if bowl_style_dict else None
+        return self._process_grouped_data(batter_data, 'bowl_style', min_balls=3)
     
     def _process_line_length_data(self, batter_data, is_phase_analysis=False):
         """Process line and length data for a batter"""
-        line_length_stats = {}
-        
-        if all(col in batter_data.columns for col in ['line', 'length']):
-            for (line, length), ll_data in batter_data.groupby(['line', 'length']):
-                if pd.isna(line) or pd.isna(length):
-                    continue
-                    
-                runs = ll_data['score'].sum()
-                balls = len(ll_data)
-                outs = ll_data['out'].sum()
-                dot_balls = len(ll_data[ll_data['score'] == 0])
-                
-                # Use lower threshold
-                min_balls = 1 
-                
-                if balls >= min_balls:
-                    line_display = DataProcessor.LINE_DISPLAY.get(int(line), 'Unknown')
-                    length_display = DataProcessor.LENGTH_DISPLAY.get(int(length), 'Unknown')
-                    
-                    stats = {
-                        'runs': int(runs),
-                        'balls': int(balls),
-                        'dismissals': int(outs),
-                        'dot_balls': int(dot_balls),
-                        'strike_rate': DataProcessor.calculate_strike_rate(runs, balls),
-                        'average': DataProcessor.calculate_average(runs, outs)
-                    }
-                    
-                    # Calculate vulnerability for this line/length
-                    stats['vulnerability'] = self.calculate_vulnerability(stats)
-                    
-                    line_length_stats[(line_display, length_display)] = stats
-        
-        return line_length_stats if line_length_stats else None
+        return self._process_grouped_data(
+            batter_data, 
+            ['line', 'length'], 
+            min_balls=5,
+            is_specialized_analysis=is_phase_analysis
+        )
     
     def analyze_batter(self, batter):
         """Return complete analysis for a specific batter"""
@@ -447,3 +364,80 @@ class BatterVulnerabilityAnalyzer:
             })
         
         return style_analysis
+    
+    def _process_grouped_data(self, data, group_by, min_balls=5, is_specialized_analysis=False):
+        """
+        Generalized function to process data grouped by specified columns
+        
+        Parameters:
+        -----------
+        data : pandas.DataFrame
+            The data to process
+        group_by : str or list
+            Column(s) to group by
+        min_balls : int
+            Minimum number of balls needed for a valid group
+        is_specialized_analysis : bool
+            If True, uses a lower threshold for filtering results
+        
+        Returns:
+        --------
+        dict
+            Dictionary with processed statistics for each group
+        """
+        result = {}
+        
+        # Handle case when the column(s) to group by don't exist
+        if not all(col in data.columns for col in ([group_by] if isinstance(group_by, str) else group_by)):
+            return result
+        
+        # Group the data
+        for group_key, group_data in data.groupby(group_by):
+            # Skip if group key is invalid
+            if isinstance(group_key, tuple):
+                if any(pd.isna(k) or k == '-' or k == '' for k in group_key):
+                    continue
+            elif pd.isna(group_key) or group_key == '-' or group_key == '':
+                continue
+                
+            # Calculate basic statistics
+            runs = group_data['score'].sum()
+            balls = len(group_data)
+            dismissals = group_data['out'].sum()
+            dot_balls = len(group_data[group_data['score'] == 0])
+            
+            # Use adjusted threshold if is_specialized_analysis
+            if balls >= (1 if is_specialized_analysis else min_balls):
+                # Process group_key to create standard dictionary key
+                if isinstance(group_key, tuple):
+                    # For line-length data, prepare display names
+                    if len(group_key) == 2 and 'line' in data.columns and 'length' in data.columns:
+                        line_display = DataProcessor.LINE_DISPLAY.get(int(group_key[0]), 'Unknown')
+                        length_display = DataProcessor.LENGTH_DISPLAY.get(int(group_key[1]), 'Unknown')
+                        dict_key = (line_display, length_display)
+                    else:
+                        dict_key = group_key
+                else:
+                    dict_key = group_key
+                
+                # Create statistics
+                stats = {
+                    'runs': int(runs),
+                    'balls': int(balls),
+                    'dismissals': int(dismissals),
+                    'dot_balls': int(dot_balls),
+                    'strike_rate': DataProcessor.calculate_strike_rate(runs, balls),
+                    'average': DataProcessor.calculate_average(runs, dismissals)
+                }
+                
+                # Add phase info if this is phase analysis
+                if isinstance(group_by, str) and group_by == 'phase':
+                    stats['phase'] = group_key
+                
+                # Calculate vulnerability
+                stats['vulnerability'] = self.calculate_vulnerability(stats)
+                
+                # Add to result
+                result[dict_key] = stats
+        
+        return result
