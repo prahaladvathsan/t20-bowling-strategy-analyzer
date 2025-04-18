@@ -135,6 +135,17 @@ if st.session_state.current_page == "Batter Analysis":
                     avg_display = f"{avg:.2f}" if avg != float('inf') else "No dismissals"
                     st.write(f"Average: {avg_display}")
                     
+                    # Add effective metrics with explanatory tooltips
+                    eff_sr = batter_profile.get('effective_strike_rate')
+                    if eff_sr is not None:
+                        st.write(f"Effective Strike Rate: {eff_sr:.2f} ❓")
+                        st.caption("Effective SR = Batter's SR relative to team's SR while at crease")
+                    
+                    eff_avg = batter_profile.get('effective_average')
+                    if eff_avg is not None:
+                        st.write(f"Effective Average: {eff_avg:.2f} ❓")
+                        st.caption("Effective Avg = Batter's avg relative to team's avg while at crease")
+                    
                     st.write(f"Total Runs: {batter_profile.get('total_runs', 0)}")
                     st.write(f"Balls Faced: {batter_profile.get('total_balls', 0)}")
                     st.write(f"Dismissals: {batter_profile.get('dismissals', 0)}")
@@ -234,7 +245,7 @@ if st.session_state.current_page == "Batter Analysis":
                 with tab3:
                     st.subheader("Performance by Phase")
                     
-                    # Get phase data
+                    # Phase data
                     phase_data = batter_profile.get('by_phase', {})
                     phase_line_length_data = batter_profile.get('phase_line_length', {})
                     
@@ -253,15 +264,25 @@ if st.session_state.current_page == "Batter Analysis":
                     )
                     
                     if selected_phase:
-                        # Display phase performance metrics in a single row using columns
+                        # Display phase performance metrics in columns
                         if phase_data and selected_phase in phase_data:
                             phase_stats = phase_data[selected_phase]
-                            col1, col2, col3 = st.columns(3)
+                            col1, col2, col3, col4, col5 = st.columns(5)
                             with col1:
                                 st.metric("Strike Rate", f"{phase_stats['strike_rate']:.2f}")
                             with col2:
                                 st.metric("Average", f"{phase_stats['average']:.2f}")
                             with col3:
+                                # Add effective strike rate if available
+                                if 'effective_strike_rate' in phase_stats:
+                                    st.metric("Effective SR ❓", f"{phase_stats['effective_strike_rate']:.2f}")
+                                    st.caption("SR relative to team's SR in this phase")
+                            with col4:
+                                # Add effective average if available
+                                if 'effective_average' in phase_stats:
+                                    st.metric("Effective Avg ❓", f"{phase_stats['effective_average']:.2f}")
+                                    st.caption("Avg relative to team's avg in this phase")
+                            with col5:
                                 st.metric("Runs/Balls", f"{phase_stats['runs']}/{phase_stats['balls']}")
                         else:
                             st.write("No data available for this phase.")
@@ -299,8 +320,19 @@ if st.session_state.current_page == "Batter Analysis":
                             # Display style performance metrics
                             style_stats = st.session_state.batter_analyzer.analyze_batter_vs_bowl_style(selected_batter, selected_style)
                             if style_stats:
+                                # Standard metrics
                                 st.metric("Strike Rate", style_stats['strike_rate'])
                                 st.metric("Average", (style_stats['average']))
+                                
+                                # Add effective metrics with explanatory tooltips
+                                if 'effective_strike_rate' in style_stats:
+                                    st.metric("Effective SR ❓", style_stats['effective_strike_rate'])
+                                    st.caption("SR relative to team's SR vs this bowling style")
+                                    
+                                if 'effective_average' in style_stats:
+                                    st.metric("Effective Avg ❓", style_stats['effective_average'])
+                                    st.caption("Avg relative to team's avg vs this bowling style")
+                                    
                                 st.metric("Runs/Balls", f"{style_stats['runs']}/{style_stats['balls']}")
                             else:
                                 st.write("No data available for this bowling style.")

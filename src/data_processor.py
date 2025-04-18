@@ -109,6 +109,9 @@ class DataProcessor:
             # Create derived columns if needed
             self._create_derived_columns(df)
             
+            # Add non-striker batter ID column
+            self._add_nonstriker_id(df)
+            
             # Store the processed data
             self.processed_data = df
             
@@ -117,6 +120,97 @@ class DataProcessor:
         except Exception as e:
             print(f"Error in data processing: {str(e)}")
             raise
+    
+    def _add_nonstriker_id(self, df):
+        """
+        Add a column for the non-striker batter ID.
+        
+        For each ball in the match, determine who the non-striker is by tracking
+        both batters at the crease and updating after dismissals.
+        
+        Parameters:
+        -----------
+        df : pandas.DataFrame
+            DataFrame to process
+        """
+        # Check if required columns exist
+        required_cols = ['p_match', 'inns', 'p_bat', 'out', 'p_out']
+        if not all(col in df.columns for col in required_cols):
+            print(f"Warning: Cannot add non-striker ID due to missing required columns: {[col for col in required_cols if col not in df.columns]}")
+            return
+            
+        # Initialize the non-striker column
+        df['p_bat_ns'] = np.nan
+        
+        # Process each match and innings separately
+        for (match_id, inns_id), innings_group in df.groupby(['p_match', 'inns']):
+            # Sort by ball_id or ball to ensure chronological order
+            if 'ball_id' in innings_group.columns:
+                innings_data = innings_group.sort_values('ball_id')
+            elif 'ball' in innings_group.columns:
+                innings_data = innings_group.sort_values('ball')
+            else:
+                innings_data = innings_group
+            
+            # Get the indices for this innings
+            innings_indices = innings_data.index.tolist()
+            
+            # Track batters at the crease [striker_id, non_striker_id]
+            batters_at_crease = [None, None]
+            
+            # Keep track of the start index where non-striker is None
+            ns_unknown_start_idx = 0
+            
+            # Process each ball in order
+            for i, idx in enumerate(innings_indices):
+                row = df.loc[idx]
+                
+                # Get current striker
+                current_striker_id = row['p_bat']
+                
+                # Handle first ball of innings
+                if i == 0:
+                    batters_at_crease[0] = current_striker_id
+                    # Non-striker will be discovered when they come on strike
+                    continue
+                
+                # Check if a wicket fell in the previous ball
+                prev_row = df.loc[innings_indices[i-1]]
+                if prev_row['out'] and pd.notna(prev_row['p_out']):
+                    dismissed_id = prev_row['p_out']
+                    
+                    # Update batters_at_crease
+                    if dismissed_id == batters_at_crease[0]:
+                        # Striker was dismissed, new batsman comes in
+                        batters_at_crease[0] = current_striker_id
+                    elif dismissed_id == batters_at_crease[1]:
+                        # Non-striker was dismissed (run out), new batsman comes in
+                        # But we don't know who they are yet until they face a ball
+                        batters_at_crease[1] = None
+                        ns_unknown_start_idx = i  # Start tracking from this point
+                
+                # If current striker is different from previous ball's striker
+                if current_striker_id != batters_at_crease[0]:
+                    # Must be the non-striker coming on strike or a new batsman
+                    if batters_at_crease[1] is None:
+                        # First time seeing this non-striker - update all previous unknown non-strikers
+                        newly_identified_nonstriker = batters_at_crease[0]
+                        
+                        # Fill in all previous balls since ns_unknown_start_idx
+                        for j in range(ns_unknown_start_idx, i):
+                            prev_idx = innings_indices[j]
+                            df.at[prev_idx, 'p_bat_ns'] = current_striker_id
+                        
+                        # Update current batters at crease
+                        batters_at_crease = [current_striker_id, newly_identified_nonstriker]
+                    else:
+                        # Regular rotation of strike
+                        batters_at_crease = [current_striker_id, batters_at_crease[0]]
+                
+                # Set the non-striker ID for current ball
+                df.at[idx, 'p_bat_ns'] = batters_at_crease[1]
+        
+        return df
     
     def _create_derived_columns(self, df):
         # Check if wagon coordinates exist

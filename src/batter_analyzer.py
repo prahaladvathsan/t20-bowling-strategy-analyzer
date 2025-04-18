@@ -60,7 +60,7 @@ class BatterVulnerabilityAnalyzer:
                 sr_component = 2.0  # High penalty for zero strike rate
         
         # Average component (dismissal tendency)
-        if stats['dismissals'] > 0:
+        if stats['average'] > 0:
             avg_component = 100 / stats['average']
         else:
             # If no dismissals, use a function of balls faced
@@ -96,6 +96,147 @@ class BatterVulnerabilityAnalyzer:
         # Cap at 100
         return min(100, vulnerability)
 
+    def _calculate_effective_metrics(self, batter):
+        """
+        Calculate effective strike rate and effective average for a batter.
+        
+        Effective strike rate: 
+            100*(Runs scored by batter/balls faced by batter)/(runs scored by team/balls faced by team)
+            
+        Effective average: 
+            (Runs scored by batter/dismissals of batter)/(runs scored by team/dismissals of team)
+            
+        Both metrics are calculated from the first ball the batter faces until dismissal in every innings.
+        Uses the p_bat_ns column to track batter presence as non-striker.
+        """
+        if 'p_match' not in self.data.columns or 'inns' not in self.data.columns:
+            # Can't calculate innings-based metrics without required identifiers
+            return None, None
+            
+        # Get batter ID if available
+        if 'p_bat' in self.data.columns:
+            # First, get all rows where this player is batting (using name)
+            batter_data = self.data[self.data['bat'] == batter]
+            
+            # Extract their player ID
+            if len(batter_data) > 0 and not batter_data['p_bat'].isnull().all():
+                batter_id = batter_data['p_bat'].iloc[0]
+            else:
+                batter_id = None
+        else:
+            batter_id = None
+            
+        # Exit if we couldn't find any data
+        if batter_id is None and len(self.data[self.data['bat'] == batter]) == 0:
+            return None, None
+            
+        effective_sr_list = []
+        effective_avg_list = []
+        
+        # Process each match and innings where batter participated
+        for (match_id, innings_id), _ in (self.data[
+            (self.data['bat'] == batter) | 
+            (self.data['p_bat'] == batter_id if batter_id is not None else False)
+        ].groupby(['p_match', 'inns'])):
+            
+            # Get all innings data
+            innings_data = self.data[(self.data['p_match'] == match_id) & 
+                                    (self.data['inns'] == innings_id)]
+            
+            # Sort by ball_id if available, otherwise by ball
+            if 'ball_id' in innings_data.columns:
+                innings_data = innings_data.sort_values('ball_id')
+            elif 'ball' in innings_data.columns:
+                innings_data = innings_data.sort_values('ball')
+                
+            # Get team of the batter
+            if 'team_bat' in innings_data.columns:
+                # Find the batter's team
+                batter_team_data = innings_data[
+                    (innings_data['bat'] == batter) | 
+                    (innings_data['p_bat'] == batter_id if batter_id is not None else False)
+                ]
+                if len(batter_team_data) == 0:
+                    continue
+                    
+                team = batter_team_data['team_bat'].iloc[0]
+                
+                # Get team data for this innings
+                team_data = innings_data[innings_data['team_bat'] == team]
+                
+                # Find when batter is at the crease (either as striker or non-striker)
+                batter_presence = team_data[
+                    (team_data['bat'] == batter) | 
+                    (team_data['p_bat'] == batter_id if batter_id is not None else False) |
+                    (team_data['p_bat_ns'] == batter_id if 'p_bat_ns' in team_data.columns and batter_id is not None else False)
+                ]
+                
+                if len(batter_presence) == 0:
+                    continue
+                
+                # Find first appearance and dismissal/last appearance
+                first_ball_idx = batter_presence.index.min()
+                
+                # Check for dismissal
+                if batter_id is not None and 'p_out' in team_data.columns:
+                    dismissal_data = team_data[team_data['p_out'] == batter_id]
+                    if len(dismissal_data) > 0:
+                        last_ball_idx = dismissal_data.index.max()
+                        batter_dismissed = True
+                    else:
+                        # If no dismissal by ID, check if batter was out when on strike
+                        dismissal_by_name = team_data[(team_data['bat'] == batter) & (team_data['out'] == True)]
+                        if len(dismissal_by_name) > 0:
+                            last_ball_idx = dismissal_by_name.index.max()
+                            batter_dismissed = True
+                        else:
+                            last_ball_idx = batter_presence.index.max()
+                            batter_dismissed = False
+                else:
+                    # Check if batter was out when on strike (by name)
+                    dismissal_by_name = team_data[(team_data['bat'] == batter) & (team_data['out'] == True)]
+                    if len(dismissal_by_name) > 0:
+                        last_ball_idx = dismissal_by_name.index.max()
+                        batter_dismissed = True
+                    else:
+                        last_ball_idx = batter_presence.index.max()
+                        batter_dismissed = False
+                
+                # Get team data while batter was at crease
+                team_subset = team_data.loc[first_ball_idx:last_ball_idx]
+                
+                # Calculate batter stats (only when on strike)
+                batter_on_strike = team_subset[team_subset['bat'] == batter]
+                batter_runs = batter_on_strike['score'].sum()
+                batter_balls = len(batter_on_strike)
+                
+                # Calculate team stats for the whole period batter was at crease
+                team_runs = team_subset['score'].sum()
+                team_balls = len(team_subset)
+                team_dismissals = team_subset['out'].sum()
+                
+                # Calculate effective metrics
+                if team_balls > 0 and batter_balls > 0:
+                    batter_sr = (batter_runs / batter_balls) * 100
+                    team_sr = (team_runs / team_balls) * 100
+                    
+                    if team_sr > 0:
+                        effective_sr = batter_sr / team_sr
+                        effective_sr_list.append(effective_sr)
+                
+                if batter_dismissed and team_dismissals > 0:
+                    team_avg = team_runs / team_dismissals
+                    
+                    if team_avg > 0:
+                        effective_avg = batter_runs / team_avg
+                        effective_avg_list.append(effective_avg)
+        
+        # Calculate average of all innings
+        eff_sr = np.mean(effective_sr_list) if effective_sr_list else None
+        eff_avg = np.mean(effective_avg_list) if effective_avg_list else None
+        
+        return eff_sr, eff_avg
+
     def _create_batter_profiles(self):
         """Create profiles for batters based on their performance"""
         profiles = {}
@@ -113,9 +254,15 @@ class BatterVulnerabilityAnalyzer:
                 # Get batting hand if available
                 bat_hand = batter_data['bat_hand'].mode().iloc[0] if 'bat_hand' in batter_data.columns else "Unknown"
                 
+                # Get batter ID if available
+                batter_id = batter_data['p_bat'].mode().iloc[0] if 'p_bat' in batter_data.columns else None
+                
                 # Use utility functions for calculations
                 strike_rate = DataProcessor.calculate_strike_rate(total_runs, total_balls)
                 average = DataProcessor.calculate_average(total_runs, dismissals)
+                
+                # Calculate effective metrics
+                effective_sr, effective_avg = self._calculate_effective_metrics(batter)
                 
                 # Process phase data
                 phase_stats = self._process_phase_data(batter_data)
@@ -130,8 +277,6 @@ class BatterVulnerabilityAnalyzer:
                 phase_line_length_stats = {}
                 if 'phase' in batter_data.columns:
                     for phase, phase_data in batter_data.groupby('phase'):
-                        print(f"Processing phase {phase} for batter {batter}")
-                        print(f"Phase data size: {len(phase_data)}")
                         phase_line_length_stats[phase] = self._process_line_length_data(phase_data, is_phase_analysis=True)
 
                 # Process bowler-style-wise line and length data
@@ -140,8 +285,6 @@ class BatterVulnerabilityAnalyzer:
                     for style, style_data in batter_data.groupby('bowl_style'):
                         if pd.isna(style) or style == '-' or style == '':
                             continue
-                        print(f"Processing style {style} for batter {batter}")
-                        print(f"Style data size: {len(style_data)}")
                         style_line_length_stats[style] = self._process_line_length_data(style_data, is_phase_analysis=True)  # Using lower threshold like phase analysis
 
                 # Calculate overall vulnerability
@@ -159,12 +302,15 @@ class BatterVulnerabilityAnalyzer:
                 # Store the complete profile
                 profiles[batter] = {
                     'bat_hand': bat_hand,
+                    'batter_id': batter_id,
                     'total_runs': int(total_runs),
                     'total_balls': int(total_balls),
                     'dismissals': int(dismissals),
                     'dot_balls': int(dot_balls),
                     'strike_rate': strike_rate,
                     'average': average,
+                    'effective_strike_rate': effective_sr,
+                    'effective_average': effective_avg,
                     'vulnerability': vulnerability_score,
                     'by_phase': phase_stats,
                     'vs_bowler_styles': bowl_style_dict,
@@ -195,6 +341,125 @@ class BatterVulnerabilityAnalyzer:
             min_balls=5,
             is_specialized_analysis=is_phase_analysis
         )
+    
+    def _process_grouped_data(self, data, group_by, min_balls=5, is_specialized_analysis=False):
+        """
+        Generalized function to process data grouped by specified columns
+        
+        Parameters:
+        -----------
+        data : pandas.DataFrame
+            The data to process
+        group_by : str or list
+            Column(s) to group by
+        min_balls : int
+            Minimum number of balls needed for a valid group
+        is_specialized_analysis : bool
+            If True, uses a lower threshold for filtering results
+        
+        Returns:
+        --------
+        dict
+            Dictionary with processed statistics for each group
+        """
+        result = {}
+        
+        # Handle case when the column(s) to group by don't exist
+        if not all(col in data.columns for col in ([group_by] if isinstance(group_by, str) else group_by)):
+            return result
+        
+        # Group the data
+        for group_key, group_data in data.groupby(group_by):
+            # Skip if group key is invalid
+            if isinstance(group_key, tuple):
+                if any(pd.isna(k) or k == '-' or k == '' for k in group_key):
+                    continue
+            elif pd.isna(group_key) or group_key == '-' or group_key == '':
+                continue
+                
+            # Calculate basic statistics
+            runs = group_data['score'].sum()
+            balls = len(group_data)
+            dismissals = group_data['out'].sum()
+            dot_balls = len(group_data[group_data['score'] == 0])
+            
+            # Calculate team statistics for effective metrics
+            if 'p_match' in group_data.columns and 'inns' in group_data.columns:
+                team_runs = 0
+                team_balls = 0
+                team_dismissals = 0
+                
+                for (match_id, innings_id), match_inns_data in group_data.groupby(['p_match', 'inns']):
+                    if 'team_bat' in match_inns_data.columns:
+                        team = match_inns_data['team_bat'].iloc[0]
+                        team_data = data[
+                            (data['p_match'] == match_id) & 
+                            (data['inns'] == innings_id) & 
+                            (data['team_bat'] == team)
+                        ]
+                        team_runs += team_data['score'].sum()
+                        team_balls += len(team_data)
+                        team_dismissals += team_data['out'].sum()
+                
+                # Calculate effective metrics with additional zero checks
+                if balls > 0 and team_balls > 0 and team_runs > 0:
+                    batter_sr = (runs / balls) * 100
+                    team_sr = (team_runs / team_balls) * 100
+                    effective_sr = batter_sr / team_sr if team_sr > 0 else None
+                else:
+                    effective_sr = None
+                    
+                if dismissals > 0 and team_dismissals > 0 and team_runs > 0:
+                    batter_avg = runs / dismissals
+                    team_avg = team_runs / team_dismissals
+                    effective_avg = batter_avg / team_avg if team_avg > 0 else None
+                else:
+                    effective_avg = None
+            else:
+                effective_sr = None
+                effective_avg = None
+            
+            # Use adjusted threshold if is_specialized_analysis
+            if balls >= (1 if is_specialized_analysis else min_balls):
+                # Process group_key to create standard dictionary key
+                if isinstance(group_key, tuple):
+                    # For line-length data, prepare display names
+                    if len(group_key) == 2 and 'line' in data.columns and 'length' in data.columns:
+                        line_display = DataProcessor.LINE_DISPLAY.get(int(group_key[0]), 'Unknown')
+                        length_display = DataProcessor.LENGTH_DISPLAY.get(int(group_key[1]), 'Unknown')
+                        dict_key = (line_display, length_display)
+                    else:
+                        dict_key = group_key
+                else:
+                    dict_key = group_key
+                
+                # Create statistics
+                stats = {
+                    'runs': int(runs),
+                    'balls': int(balls),
+                    'dismissals': int(dismissals),
+                    'dot_balls': int(dot_balls),
+                    'strike_rate': DataProcessor.calculate_strike_rate(runs, balls),
+                    'average': DataProcessor.calculate_average(runs, dismissals)
+                }
+                
+                # Add effective metrics if available
+                if effective_sr is not None:
+                    stats['effective_strike_rate'] = effective_sr
+                if effective_avg is not None:
+                    stats['effective_average'] = effective_avg
+                
+                # Add phase info if this is phase analysis
+                if isinstance(group_by, str) and group_by == 'phase':
+                    stats['phase'] = group_key
+                
+                # Calculate vulnerability
+                stats['vulnerability'] = self.calculate_vulnerability(stats)
+                
+                # Add to result
+                result[dict_key] = stats
+        
+        return result
     
     def analyze_batter(self, batter):
         """Return complete analysis for a specific batter"""
@@ -342,7 +607,6 @@ class BatterVulnerabilityAnalyzer:
     def get_data_columns(self):
         """Return a list of columns in the data"""
         if self.data is not None:
-            print("Data columns:", self.data.keys())
             return list(self.data.keys())
         return []  # Return empty list if no data is loaded
 
@@ -364,80 +628,3 @@ class BatterVulnerabilityAnalyzer:
             })
         
         return style_analysis
-    
-    def _process_grouped_data(self, data, group_by, min_balls=5, is_specialized_analysis=False):
-        """
-        Generalized function to process data grouped by specified columns
-        
-        Parameters:
-        -----------
-        data : pandas.DataFrame
-            The data to process
-        group_by : str or list
-            Column(s) to group by
-        min_balls : int
-            Minimum number of balls needed for a valid group
-        is_specialized_analysis : bool
-            If True, uses a lower threshold for filtering results
-        
-        Returns:
-        --------
-        dict
-            Dictionary with processed statistics for each group
-        """
-        result = {}
-        
-        # Handle case when the column(s) to group by don't exist
-        if not all(col in data.columns for col in ([group_by] if isinstance(group_by, str) else group_by)):
-            return result
-        
-        # Group the data
-        for group_key, group_data in data.groupby(group_by):
-            # Skip if group key is invalid
-            if isinstance(group_key, tuple):
-                if any(pd.isna(k) or k == '-' or k == '' for k in group_key):
-                    continue
-            elif pd.isna(group_key) or group_key == '-' or group_key == '':
-                continue
-                
-            # Calculate basic statistics
-            runs = group_data['score'].sum()
-            balls = len(group_data)
-            dismissals = group_data['out'].sum()
-            dot_balls = len(group_data[group_data['score'] == 0])
-            
-            # Use adjusted threshold if is_specialized_analysis
-            if balls >= (1 if is_specialized_analysis else min_balls):
-                # Process group_key to create standard dictionary key
-                if isinstance(group_key, tuple):
-                    # For line-length data, prepare display names
-                    if len(group_key) == 2 and 'line' in data.columns and 'length' in data.columns:
-                        line_display = DataProcessor.LINE_DISPLAY.get(int(group_key[0]), 'Unknown')
-                        length_display = DataProcessor.LENGTH_DISPLAY.get(int(group_key[1]), 'Unknown')
-                        dict_key = (line_display, length_display)
-                    else:
-                        dict_key = group_key
-                else:
-                    dict_key = group_key
-                
-                # Create statistics
-                stats = {
-                    'runs': int(runs),
-                    'balls': int(balls),
-                    'dismissals': int(dismissals),
-                    'dot_balls': int(dot_balls),
-                    'strike_rate': DataProcessor.calculate_strike_rate(runs, balls),
-                    'average': DataProcessor.calculate_average(runs, dismissals)
-                }
-                
-                # Add phase info if this is phase analysis
-                if isinstance(group_by, str) and group_by == 'phase':
-                    stats['phase'] = group_key
-                
-                # Calculate vulnerability
-                stats['vulnerability'] = self.calculate_vulnerability(stats)
-                
-                # Add to result
-                result[dict_key] = stats
-        
-        return result
