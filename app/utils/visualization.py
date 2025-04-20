@@ -335,3 +335,172 @@ def get_strategy_visualization(plan_data):
     
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     return fig
+def create_smart_runs_comparison(batsman_data):
+    """Create comparison chart for Smart vs Conventional Runs"""
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Prepare data
+    matches = len(batsman_data['match_performances'])
+    x = np.arange(matches)
+    
+    # Extract performance data
+    conventional = [perf['conventional_runs'] for perf in batsman_data['match_performances']]
+    smart = [perf['smart_runs'] for perf in batsman_data['match_performances']]
+    
+    # Plot bars
+    width = 0.35
+    ax.bar(x - width/2, conventional, width, label='Conventional Runs', color='skyblue')
+    ax.bar(x + width/2, smart, width, label='Smart Runs', color='orange')
+    
+    # Add labels
+    ax.set_xlabel('Match')
+    ax.set_ylabel('Runs')
+    ax.set_title('Smart vs Conventional Runs Comparison')
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"M{i+1}" for i in range(matches)])
+    ax.legend()
+    
+    plt.tight_layout()
+    return fig
+
+def create_smart_wickets_comparison(bowler_data):
+    """Create comparison chart for Smart vs Conventional Wickets"""
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Prepare data
+    matches = len(bowler_data['match_performances'])
+    x = np.arange(matches)
+    
+    # Extract performance data
+    conventional = [perf['conventional_wickets'] for perf in bowler_data['match_performances']]
+    smart = [perf['smart_wickets'] for perf in bowler_data['match_performances']]
+    
+    # Plot bars
+    width = 0.35
+    ax.bar(x - width/2, conventional, width, label='Conventional Wickets', color='skyblue')
+    ax.bar(x + width/2, smart, width, label='Smart Wickets', color='orange')
+    
+    # Add labels
+    ax.set_xlabel('Match')
+    ax.set_ylabel('Wickets')
+    ax.set_title('Smart vs Conventional Wickets Comparison')
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"M{i+1}" for i in range(matches)])
+    ax.legend()
+    
+    plt.tight_layout()
+    return fig
+
+def create_key_moments_timeline(key_moments):
+    """Create timeline visualization of key match moments"""
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    # Sort by over
+    moments_sorted = sorted(key_moments, key=lambda x: x['over'])
+    
+    # Extract data
+    overs = [moment['over'] for moment in moments_sorted]
+    impacts = [moment['total_impact'] for moment in moments_sorted]
+    players = [moment['player'] for moment in moments_sorted]
+    
+    # Plot scatter with color based on impact
+    colors = ['green' if impact > 0 else 'red' for impact in impacts]
+    ax.scatter(overs, impacts, s=100, alpha=0.7, c=colors)
+    
+    # Add player labels
+    for i, player in enumerate(players):
+        ax.annotate(player, 
+                   (overs[i], impacts[i]),
+                   xytext=(5, 5), textcoords='offset points',
+                   fontsize=8)
+    
+    # Add horizontal line at y=0
+    ax.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+    
+    # Add match progression line
+    ax.plot(overs, impacts, 'k--', alpha=0.3)
+    
+    # Set labels and grid
+    ax.set_xlabel('Over')
+    ax.set_ylabel('Impact')
+    ax.set_title('Key Match Moments')
+    ax.grid(True, alpha=0.3)
+    
+    # Add legend
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Line2D([0], [0], marker='o', color='w', markerfacecolor='green', markersize=10, label='Positive Impact'),
+        Line2D([0], [0], marker='o', color='w', markerfacecolor='red', markersize=10, label='Negative Impact')
+    ]
+    ax.legend(handles=legend_elements, loc='upper right')
+    
+    plt.tight_layout()
+    return fig
+
+def create_player_impact_breakdown(player_impacts):
+    """Create stacked bar chart showing batting vs bowling impact"""
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    # Prepare data
+    players = [impact['player'] for impact in player_impacts]
+    batting_impacts = [impact['batting_impact'] for impact in player_impacts]
+    bowling_impacts = [impact['bowling_impact'] for impact in player_impacts]
+    
+    # Plot stacked bars
+    ax.bar(players, batting_impacts, label='Batting Impact', color='skyblue')
+    ax.bar(players, bowling_impacts, bottom=batting_impacts, label='Bowling Impact', color='lightgreen')
+    
+    # Set labels and legend
+    ax.set_xlabel('Player')
+    ax.set_ylabel('Impact Score')
+    ax.set_title('Player Impact Breakdown')
+    ax.set_xticks(range(len(players)))
+    ax.set_xticklabels(players, rotation=45, ha='right')
+    ax.legend()
+    
+    plt.tight_layout()
+    return fig
+
+def create_impact_radar_chart(player_data):
+    """Create radar chart for player impact metrics"""
+    fig = plt.figure(figsize=(8, 8))
+    ax = fig.add_subplot(111, polar=True)
+    
+    # Categories for radar chart
+    categories = ['Batting Impact', 'Bowling Impact', 'Match Influence', 
+                 'Pressure Handling', 'Consistency']
+    N = len(categories)
+    
+    # Values (normalized to 0-1 range)
+    values = [
+        player_data.get('batting_impact', 0) / 5,
+        player_data.get('bowling_impact', 0) / 5,
+        player_data.get('total_impact', 0) / 10,
+        0.5,  # Placeholder - would calculate from pressure index data
+        0.7   # Placeholder - would calculate from performance consistency
+    ]
+    
+    # Close the loop
+    values = values + [values[0]]
+    
+    # Compute angles for each category
+    angles = [n / float(N) * 2 * np.pi for n in range(N)]
+    angles += angles[:1]  # Close the loop
+    
+    # Plot data
+    ax.plot(angles, values, linewidth=1, linestyle='solid')
+    
+    # Fill area
+    ax.fill(angles, values, 'skyblue', alpha=0.4)
+    
+    # Set category labels
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(categories)
+    
+    # Remove radial labels
+    ax.set_yticklabels([])
+    
+    # Add title
+    plt.title(f"Impact Profile: {player_data.get('player', 'Player')}")
+    
+    return fig
