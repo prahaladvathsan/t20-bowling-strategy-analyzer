@@ -24,8 +24,20 @@ from utils.visualization import (
     create_bowler_economy_heatmap,
     create_bowler_strike_rate_heatmap,
     create_phase_vulnerability_heatmap,
-    create_style_vulnerability_heatmap
+    create_style_vulnerability_heatmap,
+    # Add Smart Stats visualization functions
+    create_smart_runs_comparison,
+    create_smart_wickets_comparison,
+    create_key_moments_timeline,
+    create_player_impact_breakdown
 )
+
+# Add Smart Stats imports
+try:
+    from smart_stats_analyzer import SmartStatsAnalyzer
+    SMART_STATS_AVAILABLE = True
+except ImportError:
+    SMART_STATS_AVAILABLE = False
 
 def load_analyzers():
     """Load analyzers with saved data"""
@@ -35,10 +47,14 @@ def load_analyzers():
         bowler_analyzer = BowlerAnalyzer()
         plan_generator = BowlingPlanGenerator()
         
+        # Initialize Smart Stats analyzer if available
+        smart_analyzer = SmartStatsAnalyzer() if SMART_STATS_AVAILABLE else None
+        
         return {
             'batter_analyzer': batter_analyzer,
             'bowler_analyzer': bowler_analyzer,
-            'plan_generator': plan_generator
+            'plan_generator': plan_generator,
+            'smart_analyzer': smart_analyzer
         }, None
     except Exception as e:
         return None, str(e)
@@ -57,6 +73,7 @@ if 'initialized' not in st.session_state:
     st.session_state.batter_analyzer = None
     st.session_state.bowler_analyzer = None
     st.session_state.plan_generator = None
+    st.session_state.smart_analyzer = None
     st.session_state.current_page = "Batter Analysis"
     st.session_state.app_started = False
     st.session_state.analyzers_initialized = False
@@ -88,13 +105,33 @@ with st.sidebar:
                 st.session_state.batter_analyzer = analyzers['batter_analyzer']
                 st.session_state.bowler_analyzer = analyzers['bowler_analyzer']
                 st.session_state.plan_generator = analyzers['plan_generator']
+                st.session_state.smart_analyzer = analyzers.get('smart_analyzer')
                 st.session_state.analyzers_initialized = True
                 st.success("Analyzers initialized successfully")
     
-    # Navigation options
+    # Navigation options - add Smart Stats if available
+    nav_options = ["Batter Analysis", "Bowler Strategies", 
+                  "Match-up Optimization", "Complete Bowling Plan"]
+    
+    if SMART_STATS_AVAILABLE and st.session_state.smart_analyzer is not None:
+        nav_options.append("Smart Stats")
+        
+        # Add an info section about Smart Stats
+        with st.expander("About Smart Stats"):
+            st.markdown("""
+            **Smart Stats** provides context-aware cricket analytics:
+            
+            - **Pressure Index**: Measures match situation difficulty
+            - **Smart Runs**: Runs weighted by context & bowling quality
+            - **Smart Wickets**: Dismissals valued by batsman quality & match impact
+            - **Player Impact**: Overall contribution to match outcome
+            
+            Based on ESPNcricinfo's advanced metrics.
+            """)
+    
     st.session_state.current_page = st.radio(
         "Select Analysis",
-        ["Batter Analysis", "Bowler Strategies", "Match-up Optimization", "Complete Bowling Plan"],
+        nav_options,
         index=0,
         key="page_selection"
     )
@@ -778,6 +815,16 @@ elif st.session_state.current_page == "Complete Bowling Plan":
         else:
             st.error(f"Could not generate bowling plan: {plan.get('error', 'Unknown error')}")
             st.write("This may be due to insufficient data for the selected batter.")
+
+# Smart Stats dedicated page
+elif st.session_state.current_page == "Smart Stats":
+    if SMART_STATS_AVAILABLE and st.session_state.smart_analyzer is not None:
+        # Import and call the smart_stats page module
+        from pages.smart_stats import app as smart_stats_app
+        smart_stats_app()
+    else:
+        st.error("Smart Stats module is not available")
+        st.info("Make sure the smart_stats_analyzer.py is in your src directory and run the backend processor to generate Smart Stats data.")
 
 # Footer
 st.markdown("---")
