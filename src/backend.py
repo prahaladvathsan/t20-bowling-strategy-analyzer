@@ -4,7 +4,7 @@ import os
 import numpy as np
 from pathlib import Path
 from data_processor import DataProcessor
-from batter_analyzer import BatterVulnerabilityAnalyzer
+from batter_analyzer import BatterAnalyzer
 from bowler_analyzer import BowlerAnalyzer
 from bowling_plan_generator import BowlingPlanGenerator
 from smart_stats import PlayerQualityCalculator, PressureIndexEngine, SmartStatsCalculator
@@ -29,7 +29,7 @@ class Backend:
         
         # Initialize analyzers
         print("Initializing analyzers...")
-        batter_analyzer = BatterVulnerabilityAnalyzer(processed_data)
+        batter_analyzer = BatterAnalyzer(processed_data)
         bowler_analyzer = BowlerAnalyzer(processed_data)
         plan_generator = BowlingPlanGenerator(processed_data)
         
@@ -145,7 +145,7 @@ class Backend:
             
 if __name__ == "__main__":
     # Path to your data file
-    data_file = Path(__file__).parent.parent / "data" / "t20_bbb.csv"
+    data_file = Path(__file__).parent.parent / "data" / "t20_bbb_ipl.csv"
     
     # Initialize and run backend
     backend = Backend(data_file)

@@ -76,9 +76,13 @@ def process_line_length_data(stats_dict, data_type='vulnerability'):
     ball_counts = np.zeros((6, 5))
     
     if stats_dict:
+        # If we're getting a dictionary with 'vs_line_length' key, get the inner dictionary
+        if 'vs_line_length' in stats_dict:
+            stats_dict = stats_dict['vs_line_length']
+            
         for combo_key, stats in stats_dict.items():
             try:
-                # Parse the tuple of display names
+                # Parse the tuple string into line and length
                 # Remove outer parentheses and split
                 combo_str = combo_key.strip("()")
                 line_display, length_display = [s.strip().strip("'") for s in combo_str.split(',')]

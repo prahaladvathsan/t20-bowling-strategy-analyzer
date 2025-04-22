@@ -84,9 +84,47 @@ class DataProcessor:
             self.raw_data = data.copy()
         self.processed_data = None
     
+    def _is_preprocessed(self, df):
+        """
+        Check if the data has already been preprocessed
+        
+        Parameters:
+        -----------
+        df : pandas.DataFrame
+            DataFrame to check
+            
+        Returns:
+        --------
+        bool
+            True if data appears to be preprocessed, False otherwise
+        """
+        # Check for processed data markers
+        preprocessed_markers = [
+            'line_display',
+            'length_display',
+            'shot_distance',
+            'shot_angle',
+            'p_bat_ns',
+            'line_code',
+            'length_code'
+        ]
+        
+        # Check if critical derived columns exist
+        has_derived_columns = all(col in df.columns for col in preprocessed_markers)
+        
+        # Check if line and length are already standardized (numeric)
+        if 'line' in df.columns and 'length' in df.columns:
+            line_standardized = pd.api.types.is_numeric_dtype(df['line'])
+            length_standardized = pd.api.types.is_numeric_dtype(df['length'])
+        else:
+            line_standardized = False
+            length_standardized = False
+            
+        return has_derived_columns and line_standardized and length_standardized
+
     def process(self):
         """
-        Perform data cleaning and preprocessing.
+        Perform data cleaning and preprocessing if needed.
         
         Returns:
         --------
@@ -96,6 +134,15 @@ class DataProcessor:
         try:
             # Make a copy to avoid modifying the original
             df = self.raw_data.copy()
+            
+            # Check if data is already preprocessed
+            if self._is_preprocessed(df):
+                print("Data appears to be preprocessed, skipping processing steps.")
+                self.processed_data = df
+                return self.processed_data
+                
+            # If not preprocessed, continue with processing
+            print("Processing raw data...")
             
             # Ensure required columns exist
             self._validate_required_columns(df)
@@ -214,19 +261,19 @@ class DataProcessor:
     
     def _create_derived_columns(self, df):
         # Check if wagon coordinates exist
-        if 'wagon_x' in df.columns and 'wagon_y' in df.columns:
+        if 'wagonX' in df.columns and 'wagonY' in df.columns:
             # Calculate shot distance from origin (180,180)
             df['shot_distance'] = np.sqrt(
-                (df['wagon_x'] - 180) ** 2 + 
-                (df['wagon_y'] - 180) ** 2
+                (df['wagonX'] - 180) ** 2 + 
+                (df['wagonY'] - 180) ** 2
             )
             
             # Calculate shot angle (in degrees) from origin
             # Using atan2 to get angle in correct quadrant
             df['shot_angle'] = np.degrees(
                 np.arctan2(
-                    df['wagon_y'] - 180,
-                    df['wagon_x'] - 180
+                    df['wagonY'] - 180,
+                    df['wagonX'] - 180
                 )
             )
     
@@ -273,7 +320,7 @@ class DataProcessor:
             df['line_code'] = df['line']
             
             # First map to numeric values
-            df['line'] = df['line'].map(lambda x: self.LINE_MAPPING.get(x, 2))  # Default to 2 (ON_THE_STUMPS) for unknown
+            df['line'] = df['line_code'].map(lambda x: self.LINE_MAPPING.get(x, 2))  # Default to 2 (ON_THE_STUMPS) for unknown
             
             # Create display column for visualization
             df['line_display'] = df['line'].map(lambda x: self.LINE_DISPLAY.get(x, 'On Stumps'))
@@ -287,7 +334,7 @@ class DataProcessor:
             df['length_code'] = df['length']
             
             # First map to numeric values
-            df['length'] = df['length'].map(lambda x: self.LENGTH_MAPPING.get(x, 3))  # Default to 3 (GOOD_LENGTH) for unknown
+            df['length'] = df['length_code'].map(lambda x: self.LENGTH_MAPPING.get(x, 3))  # Default to 3 (GOOD_LENGTH) for unknown
             
             # Create display column for visualization
             df['length_display'] = df['length'].map(lambda x: self.LENGTH_DISPLAY.get(x, 'Good Length'))
