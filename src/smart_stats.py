@@ -48,7 +48,7 @@ class PressureIndexEngine:
         if 'inns_rrr' in ball_data and not pd.isna(ball_data['inns_rrr']):
             rrr = ball_data['inns_rrr']
         elif 'target' in ball_data and 'inns_balls_rem' in ball_data and ball_data['inns_balls_rem'] > 0:
-            runs_needed = ball_data['target'] - ball_data['inns_runs']
+            runs_needed = ball_data['target'] - ball_data['inns _runs']
             rrr = (runs_needed / ball_data['inns_balls_rem']) * 6
         else:
             rrr = 1.0  # Default value

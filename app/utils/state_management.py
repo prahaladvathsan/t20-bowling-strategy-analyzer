@@ -6,9 +6,9 @@ import streamlit as st
 # Page names moved from config.py
 PAGE_BATTER_ANALYSIS = "Batter Analysis"
 PAGE_BOWLER_STRATEGIES = "Bowler Strategies"
-PAGE_MATCHUP_OPTIMIZATION = "Match-up Optimization"
-PAGE_BOWLING_PLAN = "Complete Bowling Plan"
-PAGE_SMART_STATS = "Smart Stats"
+PAGE_MATCHUP_OPTIMIZATION = "Matchup Optimizer"
+PAGE_BOWLING_PLAN = "Bowling Plan"
+PAGE_SMART_STATS = "Smart Stats Analysis"
 
 class StateContainer:
     """Container for managing application state"""
@@ -24,7 +24,7 @@ class StateContainer:
         st.session_state.batter_analyzer = None
         st.session_state.bowler_analyzer = None
         st.session_state.plan_generator = None
-        st.session_state.smart_analyzer = None
+        st.session_state.smart_stats_analyzer = None
         st.session_state.current_page = PAGE_BATTER_ANALYSIS
         st.session_state.app_started = False
         st.session_state.analyzers_initialized = False
@@ -70,14 +70,14 @@ class StateContainer:
         st.session_state.plan_generator = value
     
     @property
-    def smart_analyzer(self):
-        """Get smart analyzer"""
-        return st.session_state.smart_analyzer
+    def smart_stats_analyzer(self):
+        """Get smart stats analyzer"""
+        return st.session_state.smart_stats_analyzer
     
-    @smart_analyzer.setter
-    def smart_analyzer(self, value):
-        """Set smart analyzer"""
-        st.session_state.smart_analyzer = value
+    @smart_stats_analyzer.setter
+    def smart_stats_analyzer(self, value):
+        """Set smart stats analyzer"""
+        st.session_state.smart_stats_analyzer = value
     
     @property
     def analyzers_initialized(self):
