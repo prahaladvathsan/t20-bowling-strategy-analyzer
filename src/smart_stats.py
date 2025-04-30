@@ -142,19 +142,7 @@ class SmartStatsCalculator:
         self.smart_metrics = {}
         
     def calculate_smart_runs(self, match_id):
-        """
-        Calculate Smart Runs for all batsmen in a match
-        
-        Parameters:
-        -----------
-        match_id : float
-            Match identifier
-        
-        Returns:
-        --------
-        dict
-            Dictionary with batsmen and their Smart Runs values
-        """
+        """Calculate Smart Runs for all batsmen in a match"""
         if self.data is None or self.pressure_engine is None:
             raise ValueError("Data or pressure engine not initialized")
             
@@ -170,7 +158,7 @@ class SmartStatsCalculator:
         for _, ball in match_data.iterrows():
             # Skip wide balls or no balls for batsmen stats
             if (('wide' in ball and ball['wide'] > 0) or 
-                ('noball' in ball and ball['noball'] > 0 and ball['score'] == 0)):
+                ('noball' in ball and ball['noball'] > 0 and ball['batruns'] == 0)):
                 continue
                 
             # Get batsman info
@@ -182,7 +170,7 @@ class SmartStatsCalculator:
                 continue
                 
             # Get runs and pressure
-            runs = ball['score'] if 'score' in ball and not pd.isna(ball['score']) else 0
+            runs = ball['batruns'] if 'batruns' in ball and not pd.isna(ball['batruns']) else 0
             pressure = ball['pressure_index']
             
             # Basic smart runs calculation: runs * pressure
@@ -510,8 +498,8 @@ class PlayerQualityCalculator:
             return 100  # Default quality
             
         # Career strike rate
-        career_runs = player_data['score'].sum()
-        career_balls = len(player_data)
+        career_runs = player_data['batruns'].sum()
+        career_balls = player_data['ballfaced'].sum()
         career_sr = (career_runs / career_balls) * 100 if career_balls > 0 else 100
         
         # Recent form (last N matches)
@@ -519,8 +507,8 @@ class PlayerQualityCalculator:
         recent_matches_list = pd.unique(recent_matches_data['p_match'])[:recent_matches]
         recent_data = player_data[player_data['p_match'].isin(recent_matches_list)]
         
-        recent_runs = recent_data['score'].sum()
-        recent_balls = len(recent_data)
+        recent_runs = recent_data['batruns'].sum()
+        recent_balls = recent_data['ballfaced'].sum()
         recent_form = (recent_runs / recent_balls) * 100 if recent_balls > 0 else career_sr
         
         # Venue average (simplified - group by ground)
@@ -528,14 +516,14 @@ class PlayerQualityCalculator:
         
         if 'ground' in player_data.columns:
             venue_data = player_data.groupby('ground').agg({
-                'score': 'sum',
-                'bat': 'count'  # Using count of bat as proxy for balls faced
+                'batruns': 'sum',
+                'ballfaced': 'sum'
             })
             
             # Calculate weighted average across venues
-            total_balls = venue_data['bat'].sum()
+            total_balls = venue_data['ballfaced'].sum()
             if total_balls > 0:
-                venue_sr = sum((venue_data['score'] / venue_data['bat']) * venue_data['bat']) / total_balls * 100
+                venue_sr = (venue_data['batruns'].sum() / total_balls) * 100
         
         # Calculate final quality index
         quality = 0.4 * career_sr + 0.3 * recent_form + 0.3 * venue_sr

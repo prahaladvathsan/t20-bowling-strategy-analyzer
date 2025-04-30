@@ -55,12 +55,17 @@ class BatterAnalyzer:
             try:
                 print(f"Processing batter: {batter}")
                 # Basic stats
-                total_runs = batter_data['score'].sum()
-                total_balls = len(batter_data)
+                total_runs = batter_data['batruns'].sum()
+                total_balls = batter_data['ballfaced'].sum()
                 dismissals = batter_data['out'].sum()
                 
-                # Count dot balls
-                dot_balls = len(batter_data[batter_data['score'] == 0])
+                # Count dot balls (when both score and batruns are 0)
+                dot_balls = len(batter_data[(batter_data['score'] == 0) & (batter_data['batruns'] == 0)])
+                
+                # Count boundaries and singles
+                singles = len(batter_data[batter_data['batruns'] == 1])
+                fours = len(batter_data[batter_data['batruns'] == 4])
+                sixes = len(batter_data[batter_data['batruns'] == 6])
                 
                 # Get batting hand if available
                 bat_hand = batter_data['bat_hand'].mode().iloc[0] if 'bat_hand' in batter_data.columns else "Unknown"
@@ -107,7 +112,10 @@ class BatterAnalyzer:
                     'dismissals': dismissals,
                     'strike_rate': strike_rate,
                     'average': average,
-                    'dot_balls': dot_balls
+                    'dot_balls': dot_balls,
+                    'singles': singles,
+                    'fours': fours,
+                    'sixes': sixes
                 }
                 
                 vulnerability_score = self.calculate_vulnerability(overall_stats)
@@ -120,6 +128,9 @@ class BatterAnalyzer:
                     'total_balls': int(total_balls),
                     'dismissals': int(dismissals),
                     'dot_balls': int(dot_balls),
+                    'singles': int(singles),
+                    'fours': int(fours),
+                    'sixes': int(sixes),
                     'strike_rate': strike_rate,
                     'average': average,
                     'effective_strike_rate': effective_sr,
@@ -322,10 +333,15 @@ class BatterAnalyzer:
                 continue
                 
             # Calculate basic statistics
-            runs = group_data['score'].sum()
-            balls = len(group_data)
+            runs = group_data['batruns'].sum()
+            balls = group_data['ballfaced'].sum()
             dismissals = group_data['out'].sum()
-            dot_balls = len(group_data[group_data['score'] == 0])
+            dot_balls = len(group_data[(group_data['score'] == 0) & (group_data['batruns'] == 0)])
+            
+            # Count boundaries and singles
+            singles = len(group_data[group_data['batruns'] == 1])
+            fours = len(group_data[group_data['batruns'] == 4])
+            sixes = len(group_data[group_data['batruns'] == 6])
             
             # Skip groups with insufficient data
             if balls < min_balls:
@@ -413,6 +429,9 @@ class BatterAnalyzer:
                 'balls': int(balls),
                 'dismissals': int(dismissals),
                 'dot_balls': int(dot_balls),
+                'singles': int(singles),
+                'fours': int(fours),
+                'sixes': int(sixes),
                 'strike_rate': strike_rate,
                 'average': average
             }
