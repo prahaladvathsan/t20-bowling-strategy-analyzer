@@ -1,5 +1,94 @@
+"""Data processing utilities for cricket analytics"""
+from typing import Dict, List, Optional, Tuple, Any
 import pandas as pd
 import numpy as np
+from dataclasses import dataclass
+
+@dataclass
+class GroupConfig:
+    """Configuration for data grouping"""
+    group_by: Optional[str | List[str]]
+    min_balls: int = 5
+    filters: Optional[Dict[str, Any]] = None
+
+class DataFrameProcessor:
+    """Handles common DataFrame operations for cricket analysis"""
+    
+    # Display mappings
+    LINE_DISPLAY = {
+        1: "Wide Outside Off",
+        2: "Outside Off",
+        3: "Off",
+        4: "Middle",
+        5: "Leg",
+        6: "Wide Outside Leg"
+    }
+    
+    LENGTH_DISPLAY = {
+        1: "Yorker",
+        2: "Full",
+        3: "Good",
+        4: "Short",
+        5: "Bouncer"
+    }
+    
+    @staticmethod
+    def apply_filters(data: pd.DataFrame, filters: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
+        """Apply filters to DataFrame"""
+        if not filters:
+            return data
+            
+        filtered_data = data.copy()
+        for col, value in filters.items():
+            if col in filtered_data.columns:
+                filtered_data = filtered_data[filtered_data[col] == value]
+        return filtered_data
+    
+    @staticmethod
+    def validate_columns(data: pd.DataFrame, required_cols: List[str]) -> List[str]:
+        """Validate required columns exist in DataFrame"""
+        return [col for col in required_cols if col not in data.columns]
+    
+    @staticmethod
+    def clean_group_key(key: Any) -> bool:
+        """Check if group key is valid"""
+        if isinstance(key, tuple):
+            return not any(pd.isna(k) or k == '-' or k == '' for k in key)
+        return not (pd.isna(key) or key == '-' or key == '')
+    
+    @staticmethod
+    def format_line_length(line: int, length: int) -> Tuple[str, str]:
+        """Convert line/length codes to display names"""
+        line_display = DataFrameProcessor.LINE_DISPLAY.get(int(line), 'Unknown')
+        length_display = DataFrameProcessor.LENGTH_DISPLAY.get(int(length), 'Unknown')
+        return line_display, length_display
+    
+    @staticmethod
+    def get_unique_values(data: pd.DataFrame, column: str) -> List[str]:
+        """Get unique valid values from a column"""
+        if column not in data.columns:
+            return []
+        values = data[column].dropna().unique()
+        return sorted([str(v) for v in values if str(v) != '-' and str(v) != ''])
+    
+    @staticmethod
+    def process_groups(data: pd.DataFrame, config: GroupConfig) -> Dict:
+        """Process data according to grouping configuration"""
+        if not config.group_by:
+            return {}
+            
+        # Apply filters if any
+        if config.filters:
+            data = DataFrameProcessor.apply_filters(data, config.filters)
+            
+        # Handle missing columns
+        if isinstance(config.group_by, list):
+            if not all(col in data.columns for col in config.group_by):
+                return {}
+        elif config.group_by not in data.columns:
+            return {}
+            
+        return data.groupby(config.group_by)
 
 class DataProcessor:
     """
