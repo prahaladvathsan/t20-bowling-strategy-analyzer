@@ -97,11 +97,15 @@ class Backend:
         serializable_profiles = self._make_json_serializable(profiles)
         with open(self.db_path / "batter_profiles.json", "w") as f:
             json.dump(serializable_profiles, f)
+        with open(r"C:\Users\praha\Documents\IIT madras\Research\DDP\T20s\T20-BBB-Simulator\data\players\batting_stats.json", 'w') as f:
+            json.dump(serializable_profiles, f)
             
     def _save_bowler_profiles(self, profiles):
         """Save bowler profiles"""
         serializable_profiles = self._make_json_serializable(profiles)
         with open(self.db_path / "bowler_profiles.json", "w") as f:
+            json.dump(serializable_profiles, f)
+        with open(r"C:\Users\praha\Documents\IIT madras\Research\DDP\T20s\T20-BBB-Simulator\data\players\bowling_stats.json", 'w') as f:
             json.dump(serializable_profiles, f)
             
     def _save_plan_generator_data(self, plan_generator):

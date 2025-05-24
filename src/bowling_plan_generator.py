@@ -459,8 +459,9 @@ class BowlingPlanGenerator:
         # Define phases
         phases = {
             1: 'Powerplay (1-6)',
-            2: 'Middle Overs (7-15)',
-            3: 'Death Overs (16-20)'
+            2: 'Early Middle (7-12)',
+            3: 'Late Middle (13-16)', 
+            4: 'Death Overs (17-20)'
         }
         
         # For each phase
@@ -557,17 +558,22 @@ class BowlingPlanGenerator:
             field_setting['boundary_riders'] = ['deep square leg', 'deep point', 'long-off', 'deep fine leg']
             field_setting['description'] += ' - Defensive field with 4 boundary riders as per powerplay restrictions'
             
-        elif phase == 2:  # Middle overs
+        elif phase == 2:  # Early Middle (7-12)
             field_setting['boundary_riders'] = ['deep square leg', 'deep midwicket', 'long-on', 'long-off', 'deep cover']
             
             if bowler_type and 'spin' in bowler_type.lower():
                 field_setting['catching_positions'].extend(['slip', 'short leg', 'silly point'])
-                field_setting['description'] += ' - Attacking field for spin with close catchers and boundary protection'
+                field_setting['description'] += ' - Attacking field for spin with close catchers'
             else:
                 field_setting['catching_positions'].extend(['slip', 'gully'])
-                field_setting['description'] += ' - Balanced field with catching positions and boundary protection'
+                field_setting['description'] += ' - Balanced field with catching positions'
                 
-        elif phase == 3:  # Death overs
+        elif phase == 3:  # Late Middle (13-16) 
+            field_setting['boundary_riders'] = ['deep square leg', 'deep midwicket', 'long-on', 'long-off', 'deep cover']
+            field_setting['catching_positions'].extend(['slip'])
+            field_setting['description'] += ' - Semi-defensive field balancing attack and boundary protection'
+            
+        elif phase == 4:  # Death (17-20)
             field_setting['boundary_riders'] = ['deep square leg', 'deep midwicket', 'long-on', 'long-off', 'deep cover', 'third man']
             field_setting['description'] += ' - Defensive field focused on boundary protection for death overs'
         

@@ -116,8 +116,23 @@ class DataProcessor:
     # Phase definitions
     PHASE_NAMES = {
         1: 'Powerplay (1-6)',
-        2: 'Middle Overs (7-15)',
-        3: 'Death Overs (16-20)'
+        2: 'Early Middle (7-12)',
+        3: 'Late Middle (13-16)',
+        4: 'Death (17-20)'
+    }
+
+    BATTING_POSITION_DISPLAY = {
+        1: 'Opener',
+        2: 'Opener',
+        3: 'Top Order',
+        4: 'Middle Order',
+        5: 'Middle Order',
+        6: 'Middle Order',
+        7: 'Lower Order',
+        8: 'Lower Order',
+        9: 'Lower Order',
+        10: 'Lower Order',
+        11: 'Lower Order'
     }
     
     # Line and Length standardization mappings
@@ -227,6 +242,7 @@ class DataProcessor:
             # Check if data is already preprocessed
             if self._is_preprocessed(df):
                 print("Data appears to be preprocessed, skipping processing steps.")
+                self._remove_missing_values(df)
                 self.processed_data = df
                 return self.processed_data
                 
@@ -237,7 +253,7 @@ class DataProcessor:
             self._validate_required_columns(df)
             
             # Fill missing values with appropriate defaults
-            self._fill_missing_values(df)
+            self._remove_missing_values(df)
             
             # Standardize column values
             self._standardize_columns(df)
@@ -366,6 +382,30 @@ class DataProcessor:
                 )
             )
     
+    def _remove_missing_values(self, df):
+        """
+        Remove missing values from the DataFrame.
+        """
+        string_cols = df.select_dtypes(include=['object']).columns
+        for col in string_cols:
+            df[col] = df[col].dropna()
+        
+        # Fill missing numeric columns with appropriate defaults
+        numeric_cols = df.select_dtypes(include=['number']).columns
+        
+        # Specific handling for some important numeric columns
+        if 'score' in numeric_cols:
+            df['score'] = df['score'].fillna(0)
+        
+        if 'out' in df.columns:
+            df['out'] = df['out'].fillna(False)
+        
+        
+        # Fill remaining numeric columns with 0
+        for col in numeric_cols:
+            if df[col].isna().any():
+                df[col] = df[col].fillna(0)
+    
     def _fill_missing_values(self, df):
         """
         Fill missing values with appropriate defaults.
@@ -409,7 +449,7 @@ class DataProcessor:
             df['line_code'] = df['line']
             
             # First map to numeric values
-            df['line'] = df['line_code'].map(lambda x: self.LINE_MAPPING.get(x, 2))  # Default to 2 (ON_THE_STUMPS) for unknown
+            df['line'] = df['line_code'].map(lambda x: self.LINE_MAPPING.get(x, 5))  # Default to 2 (ON_THE_STUMPS) for unknown
             
             # Create display column for visualization
             df['line_display'] = df['line'].map(lambda x: self.LINE_DISPLAY.get(x, 'On Stumps'))
@@ -423,7 +463,7 @@ class DataProcessor:
             df['length_code'] = df['length']
             
             # First map to numeric values
-            df['length'] = df['length_code'].map(lambda x: self.LENGTH_MAPPING.get(x, 3))  # Default to 3 (GOOD_LENGTH) for unknown
+            df['length'] = df['length_code'].map(lambda x: self.LENGTH_MAPPING.get(x, 6))  # Default to 3 (GOOD_LENGTH) for unknown
             
             # Create display column for visualization
             df['length_display'] = df['length'].map(lambda x: self.LENGTH_DISPLAY.get(x, 'Good Length'))

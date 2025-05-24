@@ -14,6 +14,7 @@ class BowlerAnalyzer:
         'overall': GroupConfig(group_by=None, min_balls=10),
         'phase': GroupConfig(group_by='phase', min_balls=10),
         'batting_hand': GroupConfig(group_by='bat_hand', min_balls=5),
+        'over': GroupConfig(group_by='over', min_balls=5),
         'line_length': GroupConfig(group_by=['line', 'length'], min_balls=1),
         'phase_line_length': GroupConfig(group_by=['phase', 'line', 'length'], min_balls=1)
     }
@@ -54,23 +55,37 @@ class BowlerAnalyzer:
         """Create profiles for bowlers based on their performance"""
         profiles = {}
         
-        for bowler, bowler_data in self.data.groupby('bowl'):
+        for bowler_id, bowler_data in self.data.groupby('p_bowl'):
             try:
+                # Filter out rows with unknown values
+                bowler_data = bowler_data[
+                    (bowler_data['bowl_kind'] != 'unknown') &
+                    (bowler_data['bowl_style'] != 'unknown') &
+                    (bowler_data['line'] != 'unknown') &
+                    (bowler_data['length'] != 'unknown')
+                ]
+                
+                if len(bowler_data) == 0:
+                    continue
+                
                 # Get basic stats
                 stats = self.stats_processor.extract_bowling_stats(bowler_data)
                 
                 # Get bowler type
-                bowl_kind = bowler_data['bowl_kind'].iloc[0] if 'bowl_kind' in bowler_data.columns else 'Unknown'
-                bowl_style = bowler_data['bowl_style'].iloc[0] if 'bowl_style' in bowler_data.columns else 'Unknown'
+                bowl_kind = bowler_data['bowl_kind'].iloc[0]
+                bowl_style = bowler_data['bowl_style'].iloc[0]
                 
                 # Process different analysis types
                 phase_stats = self._process_analysis(bowler_data, 'phase')
                 batting_hand_stats = self._process_analysis(bowler_data, 'batting_hand')
+                over_stats = self._process_analysis(bowler_data, 'over')
                 line_length_stats = self._process_analysis(bowler_data, 'line_length')
                 phase_ll_stats = self._process_analysis(bowler_data, 'phase_line_length')
+                bowler = self.get_bowler_name(bowler_id)
                 
                 # Create profile
-                profiles[bowler] = {
+                profiles[bowler_id] = {
+                    'name': bowler,
                     'bowl_kind': bowl_kind,
                     'bowl_style': bowl_style,
                     'total_runs': stats.runs,
@@ -89,6 +104,7 @@ class BowlerAnalyzer:
                     'bowling_strike_rate': stats.bowling_strike_rate,
                     'by_phase': phase_stats,
                     'vs_batting_hand': batting_hand_stats,
+                    'by_over': over_stats,
                     'by_line_length': line_length_stats,
                     'phase_line_length': phase_ll_stats
                 }
@@ -109,9 +125,15 @@ class BowlerAnalyzer:
         
         results = {}
         for group_key, group_data in groups:
-            if not DataFrameProcessor.clean_group_key(group_key):
+            # Skip unknown entries
+            if not DataFrameProcessor.clean_group_key(group_key) or group_key == "unknown":
                 continue
                 
+            # For line-length analysis, skip if either line or length is unknown
+            if isinstance(group_key, tuple) and len(group_key) == 2:
+                if "unknown" in group_key:
+                    continue
+                    
             stats = self.stats_processor.process_group(group_data, config.min_balls)
             if stats is None:
                 continue
@@ -119,6 +141,9 @@ class BowlerAnalyzer:
             # Handle line-length formatting
             if isinstance(group_key, tuple) and len(group_key) == 2 and 'line' in data.columns:
                 line_display, length_display = DataFrameProcessor.format_line_length(group_key[0], group_key[1])
+                # Skip if either line or length is unknown
+                if "unknown" in (line_display, length_display):
+                    continue
                 results[(line_display, length_display)] = stats.__dict__
             else:
                 results[group_key] = stats.__dict__
@@ -180,6 +205,7 @@ class BowlerAnalyzer:
             'overall': profile,
             'phase': 'by_phase',
             'batting_hand': 'vs_batting_hand',
+            'over': 'by_over',
             'line_length': 'by_line_length',
             'phase_line_length': 'phase_line_length'
         }
@@ -215,3 +241,15 @@ class BowlerAnalyzer:
     def get_all_bowlers(self) -> List[str]:
         """Return a list of all bowlers in the profiles"""
         return list(self.bowler_profiles.keys())
+    
+    def get_bowler_name(self, bowler_id: str) -> Optional[str]:
+        """Get bowler name with caching"""
+        if self.data is None:
+            return None
+            
+        bowler_data = self.data[self.data['p_bowl'] == bowler_id]
+        if 'bowl' in bowler_data.columns and len(bowler_data) > 0:
+            return bowler_data['bowl'].iloc[0] if not bowler_data['bowl'].isnull().all() else None
+        return None
+    
+

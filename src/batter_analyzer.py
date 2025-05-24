@@ -18,6 +18,7 @@ class BatterAnalyzer:
         'phase': GroupConfig(group_by='phase', min_balls=10),
         'bowling_style': GroupConfig(group_by='bowl_style', min_balls=3),
         'batting_hand': GroupConfig(group_by='bat_hand', min_balls=5),
+        'bat_pos': GroupConfig(group_by='bat_pos', min_balls=5),
         'line_length': GroupConfig(group_by=['line', 'length'], min_balls=1),
         'phase_line_length': GroupConfig(group_by=['phase', 'line', 'length'], min_balls=1),
         'style_line_length': GroupConfig(group_by=['bowl_style', 'line', 'length'], min_balls=1)
@@ -54,28 +55,39 @@ class BatterAnalyzer:
             raise ValueError("No saved profiles found. Please run the backend processor first.")
 
     @lru_cache(maxsize=128)
-    def get_batter_id(self, batter: str) -> Optional[str]:
-        """Get batter ID with caching"""
+    def get_batter_name(self, batter_id: str) -> Optional[str]:
+        """Get batter name with caching"""
         if self.data is None:
             return None
             
-        batter_data = self.data[self.data['bat'] == batter]
-        if 'p_bat' in batter_data.columns and len(batter_data) > 0:
-            return batter_data['p_bat'].iloc[0] if not batter_data['p_bat'].isnull().all() else None
+        batter_data = self.data[self.data['p_bat'] == batter_id]
+        if 'bat' in batter_data.columns and len(batter_data) > 0:
+            return batter_data['bat'].iloc[0] if not batter_data['bat'].isnull().all() else None
         return None
 
     def _create_batter_profiles(self) -> Dict:
         """Create profiles for batters based on their performance"""
         profiles = {}
         
-        for batter, batter_data in self.data.groupby('bat'):
+        for batter_id, batter_data in self.data.groupby('p_bat'):
             try:
+                # Filter out rows with unknown values
+                batter_data = batter_data[
+                    (batter_data['bat_hand'] != 'unknown') &
+                    (batter_data['bowl_style'] != 'unknown') &
+                    (batter_data['line'] != 'unknown') &
+                    (batter_data['length'] != 'unknown')
+                ]
+                
+                if len(batter_data) == 0:
+                    continue
+                
                 # Get basic stats
                 stats = self.stats_processor.extract_basic_stats(batter_data)
                 
-                # Get batting hand and ID
-                bat_hand = batter_data['bat_hand'].mode().iloc[0] if 'bat_hand' in batter_data.columns else "Unknown"
-                batter_id = self.get_batter_id(batter)
+                # Get batting hand and name
+                bat_hand = batter_data['bat_hand'].mode().iloc[0]
+                batter = self.get_batter_name(batter_id)
                 
                 # Calculate effective metrics
                 effective_sr, effective_avg = self.metrics_calculator.calculate_effective_metrics(batter)
@@ -84,6 +96,7 @@ class BatterAnalyzer:
                 phase_stats = self._process_analysis(batter_data, 'phase')
                 bowl_style_stats = self._process_analysis(batter_data, 'bowling_style')
                 batting_hand_stats = self._process_analysis(batter_data, 'batting_hand')
+                bat_pos_stats = self._process_analysis(batter_data, 'bat_pos')
                 line_length_stats = self._process_analysis(batter_data, 'line_length')
                 phase_ll_stats = self._process_analysis(batter_data, 'phase_line_length')
                 style_ll_stats = self._process_analysis(batter_data, 'style_line_length')
@@ -92,7 +105,8 @@ class BatterAnalyzer:
                 vulnerability = self.stats_processor.calculate_vulnerability(stats)
                 
                 # Create profile
-                profiles[batter] = {
+                profiles[batter_id] = {
+                    'name': batter,
                     'bat_hand': bat_hand,
                     'batter_id': batter_id,
                     'total_runs': stats.runs,
@@ -110,6 +124,7 @@ class BatterAnalyzer:
                     'by_phase': phase_stats,
                     'vs_bowler_styles': bowl_style_stats,
                     'vs_batting_hand': batting_hand_stats,
+                    'by_bat_pos': bat_pos_stats,
                     'vs_line_length': line_length_stats,
                     'phase_line_length': phase_ll_stats,
                     'style_line_length': style_ll_stats
@@ -131,9 +146,15 @@ class BatterAnalyzer:
         
         results = {}
         for group_key, group_data in groups:
-            if not DataFrameProcessor.clean_group_key(group_key):
+            # Skip unknown entries
+            if not DataFrameProcessor.clean_group_key(group_key) or group_key == "unknown":
                 continue
                 
+            # For line-length analysis, skip if either line or length is unknown
+            if isinstance(group_key, tuple) and len(group_key) == 2:
+                if "unknown" in group_key:
+                    continue
+                    
             stats = self.stats_processor.process_group(group_data, config.min_balls)
             if stats is None:
                 continue
@@ -141,8 +162,14 @@ class BatterAnalyzer:
             # Handle line-length formatting
             if isinstance(group_key, tuple) and len(group_key) == 2 and 'line' in data.columns:
                 line_display, length_display = DataFrameProcessor.format_line_length(group_key[0], group_key[1])
+                # Skip if either line or length is unknown
+                if "unknown" in (line_display, length_display):
+                    continue
                 results[(line_display, length_display)] = stats.__dict__
             else:
+                # Convert numeric keys to integers if they are whole numbers
+                if isinstance(group_key, (int, float)) and float(group_key).is_integer():
+                    group_key = int(group_key)
                 results[group_key] = stats.__dict__
                 
         return results
@@ -167,6 +194,7 @@ class BatterAnalyzer:
             'phase': 'by_phase',
             'bowling_style': 'vs_bowler_styles',
             'batting_hand': 'vs_batting_hand',
+            'bat_pos': 'by_bat_pos',
             'line_length': 'vs_line_length',
             'phase_line_length': 'phase_line_length',
             'style_line_length': 'style_line_length'
